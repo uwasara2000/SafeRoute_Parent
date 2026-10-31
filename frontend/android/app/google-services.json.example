@@ -1,0 +1,24 @@
+{
+  "project_info": {
+    "project_number": "633595353219",
+    "firebase_url": "https://track-my-kid-dae5b-default-rtdb.firebaseio.com",
+    "project_id": "track-my-kid-dae5b",
+    "storage_bucket": "track-my-kid-dae5b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:633595353219:android:702e446d78c05ad80ea3b6",
+        "android_client_info": {
+          "package_name": "com.example.track_my_kid_app"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "YOUR_FIREBASE_API_KEY_HERE"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
