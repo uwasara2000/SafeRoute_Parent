@@ -26,6 +26,13 @@ backend/node_modules/
 backend/.env
 *.env
 
+# Sensitive Credentials & Keys (prevent GitHub secret leak)
+**/google-services.json
+**/google-services*.json
+**/firebase_options.dart
+**/local.properties
+local.properties
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
@@ -43,7 +50,6 @@ coverage/
 **/android/app/debug
 **/android/app/profile
 **/android/app/release
-**/android/local.properties
 
 # Widget Preview related
 .widget_preview/
