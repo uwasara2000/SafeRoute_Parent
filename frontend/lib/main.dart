@@ -1,32 +1,40 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'core/constants/app_colors.dart';
 import 'firebase_options.dart';
-import 'features/tracking/screens/live_tracking_screen.dart';
+import 'features/onboarding/screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase using the generated configuration
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  runApp(const ParentTrackingApp());
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Firebase.initializeApp() note: $e');
+  }
+  runApp(const SafeRouteApp());
 }
 
-class ParentTrackingApp extends StatelessWidget {
-  const ParentTrackingApp({super.key});
+/// Root widget for the SafeRoute (Track My Kid) application
+class SafeRouteApp extends StatelessWidget {
+  const SafeRouteApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Parent Bus Tracking',
+      title: 'SafeRoute',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
         useMaterial3: true,
+        scaffoldBackgroundColor: AppColors.background,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppColors.primaryTeal,
+          primary: AppColors.primaryTeal,
+          surface: AppColors.background,
+        ),
       ),
-      home: const LiveTrackingScreen(tripId: 'trip_001'),
+      home: const SplashScreen(),
     );
   }
 }
