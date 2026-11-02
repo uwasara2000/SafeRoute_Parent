@@ -14,5 +14,8 @@ router.get('/trips/:tripId/eta', (req, res) => parentController.getETA(req, res)
 // Boarding, drop-off, and stop timeline events
 router.get('/trips/:tripId/events', (req, res) => parentController.getEvents(req, res));
 
+// Update child pickup / drop-off location
+router.put('/trips/:tripId/stops', (req, res) => parentController.updateStops(req, res));
+
 module.exports = router;
 

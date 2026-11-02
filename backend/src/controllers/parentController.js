@@ -99,6 +99,29 @@ class ParentController {
       res.status(500).json({ error: 'Failed to fetch timeline events' });
     }
   }
+
+  /**
+   * PUT /api/parent/trips/:tripId/stops
+   */
+  async updateStops(req, res) {
+    try {
+      const { tripId } = req.params;
+      const { pickup, destination } = req.body;
+
+      const updatedTrip = await tripService.updateTripStops(tripId, { pickup, destination });
+      if (!updatedTrip) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
+
+      res.json({
+        message: 'Pickup and drop-off updated successfully',
+        trip: updatedTrip
+      });
+    } catch (error) {
+      console.error('updateStops error:', error);
+      res.status(500).json({ error: 'Failed to update stops' });
+    }
+  }
 }
 
 module.exports = new ParentController();

@@ -143,6 +143,55 @@ class TripService {
     const trip = trips[tripId];
     return trip ? trip.events : [];
   }
+
+  /**
+   * Update pickup or drop-off location for a trip
+   */
+  async updateTripStops(tripId, { pickup, destination }) {
+    const trip = trips[tripId];
+    if (!trip) return null;
+
+    if (destination) {
+      trip.destination = {
+        name: destination.name || trip.destination.name,
+        latitude: Number(destination.latitude),
+        longitude: Number(destination.longitude)
+      };
+      // Also update the last stop
+      const lastStopIndex = trip.stops.length - 1;
+      if (lastStopIndex >= 0) {
+        trip.stops[lastStopIndex] = {
+          id: 'stop_destination',
+          name: trip.destination.name,
+          latitude: trip.destination.latitude,
+          longitude: trip.destination.longitude,
+          order: trip.stops.length
+        };
+      }
+    }
+
+    if (pickup) {
+      if (trip.stops.length > 0) {
+        trip.stops[0] = {
+          id: 'stop_pickup',
+          name: pickup.name || trip.stops[0].name,
+          latitude: Number(pickup.latitude),
+          longitude: Number(pickup.longitude),
+          order: 1
+        };
+      }
+    }
+
+    // Also sync to Firebase Realtime Database
+    try {
+      await firebaseRest.set(`liveTrips/${tripId}/destination`, trip.destination);
+      await firebaseRest.set(`liveTrips/${tripId}/stops`, trip.stops);
+    } catch (e) {
+      console.warn('Firebase sync warning:', e.message);
+    }
+
+    return trip;
+  }
 }
 
 module.exports = new TripService();

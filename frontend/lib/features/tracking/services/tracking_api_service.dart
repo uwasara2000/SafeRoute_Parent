@@ -99,5 +99,37 @@ class TrackingApiService {
     }
     return null;
   }
+
+  /// PUT /api/parent/trips/:tripId/stops
+  Future<TripDetails?> updateStops({
+    required String tripId,
+    Map<String, dynamic>? pickup,
+    Map<String, dynamic>? destination,
+  }) async {
+    try {
+      final host = await _getHost();
+      final url = Uri.parse('$host/api/parent/trips/$tripId/stops');
+      final res = await http
+          .put(
+            url,
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              if (pickup != null) 'pickup': pickup,
+              if (destination != null) 'destination': destination,
+            }),
+          )
+          .timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['trip'] != null) {
+          return TripDetails.fromMap(data['trip'] as Map<String, dynamic>);
+        }
+      }
+    } catch (e) {
+      debugPrint('updateStops note: $e');
+    }
+    return null;
+  }
 }
 

@@ -32,6 +32,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   EtaInfo? _latestEta;
   bool _isTripActive = true;
   bool _isLoadingTrip = true;
+  bool _autoFollowBus = true; // Automatically tracks bus during ride
+  bool _isProgrammaticCameraMove = false; // Prevents programmatic camera moves from disabling auto-follow
+
+  // Current pickup & drop-off locations
+  BusStop? _currentPickup;
+  BusStop? _currentDropOff;
+  String _rideStatus = 'ON BOARD'; // 'WAITING FOR BUS', 'ON BOARD', 'ARRIVED'
 
   Marker? _busMarker;
   final Set<Marker> _stopMarkers = {};
@@ -42,14 +49,34 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   // Default initial camera position (Colombo area)
   static const LatLng _initialPosition = LatLng(6.9271, 79.8612);
 
+  // Available Pickup Places for Parents to select
+  final List<BusStop> _availablePickups = const [
+    BusStop(id: 'pickup_wattala', name: 'Wattala Junction (Main Road)', latitude: 6.9890, longitude: 79.8910, order: 1),
+    BusStop(id: 'pickup_negombo', name: 'Negombo Road / Mabole', latitude: 6.9810, longitude: 79.8930, order: 1),
+    BusStop(id: 'pickup_peliyagoda', name: 'Peliyagoda Interchange', latitude: 6.9650, longitude: 79.9050, order: 1),
+    BusStop(id: 'pickup_kelaniya', name: 'Kelaniya Temple Road', latitude: 6.9530, longitude: 79.9160, order: 1),
+    BusStop(id: 'pickup_kiribathgoda', name: 'Kiribathgoda Town Stop', latitude: 6.9790, longitude: 79.9280, order: 1),
+    BusStop(id: 'pickup_kadawatha', name: 'Kadawatha Bus Stand', latitude: 7.0010, longitude: 79.9520, order: 1),
+  ];
+
+  // Available Drop-off / Destination Places
+  final List<BusStop> _availableDropOffs = const [
+    BusStop(id: 'dest_gateway_main', name: 'Gateway College (Main Gate)', latitude: 6.9080, longitude: 79.8970, order: 99),
+    BusStop(id: 'dest_gateway_junior', name: 'Gateway Junior School Gate', latitude: 6.9095, longitude: 79.8950, order: 99),
+    BusStop(id: 'dest_borella', name: 'Borella Junction Stop', latitude: 6.9140, longitude: 79.8770, order: 99),
+    BusStop(id: 'dest_rajagiriya', name: 'Rajagiriya Afterschool Care', latitude: 6.9110, longitude: 79.8890, order: 99),
+    BusStop(id: 'dest_royal_college', name: 'Royal College Sports Complex', latitude: 6.9040, longitude: 79.8620, order: 99),
+    BusStop(id: 'dest_colombo_library', name: 'Public Library Colombo 07', latitude: 6.9130, longitude: 79.8600, order: 99),
+  ];
+
   @override
   void initState() {
     super.initState();
     _loadTripDetailsAndStops();
     _subscribeToTrip();
 
-    // Re-render every 4 seconds to update "Updated X seconds ago" freshness label
-    _statusTicker = Timer.periodic(const Duration(seconds: 4), (_) {
+    // Re-render every 3 seconds to update freshness label
+    _statusTicker = Timer.periodic(const Duration(seconds: 3), (_) {
       if (mounted) setState(() {});
     });
 
@@ -68,54 +95,80 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       _isLoadingTrip = false;
       if (details != null) {
         _isTripActive = details.active;
-        _buildStopsAndRoute(details);
+        _currentPickup = details.stops.isNotEmpty ? details.stops.first : _availablePickups.first;
+        _currentDropOff = details.destination;
+        _buildStopsAndRoute();
       }
     });
 
     _refreshETA();
   }
 
-  void _buildStopsAndRoute(TripDetails details) {
+  void _buildStopsAndRoute() {
     _stopMarkers.clear();
     _polylines.clear();
 
     final List<LatLng> routePoints = [];
 
-    for (int i = 0; i < details.stops.length; i++) {
-      final stop = details.stops[i];
-      final pos = LatLng(stop.latitude, stop.longitude);
-      routePoints.add(pos);
-
-      final isFirst = i == 0;
-      final isLast = i == details.stops.length - 1;
-
-      double hue;
-      String snippet;
-      if (isFirst) {
-        hue = BitmapDescriptor.hueGreen;
-        snippet = 'Child Pickup Stop';
-      } else if (isLast) {
-        hue = BitmapDescriptor.hueRed;
-        snippet = 'Final Destination (School)';
-      } else {
-        hue = BitmapDescriptor.hueAzure;
-        snippet = 'Stop #${stop.order}';
-      }
-
+    // 1. Add Pickup Marker (🟢 Green)
+    if (_currentPickup != null) {
+      final pickupPos = LatLng(_currentPickup!.latitude, _currentPickup!.longitude);
+      routePoints.add(pickupPos);
       _stopMarkers.add(
         Marker(
-          markerId: MarkerId('stop_${stop.id}'),
-          position: pos,
-          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+          markerId: const MarkerId('stop_pickup'),
+          position: pickupPos,
+          zIndex: 5,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           infoWindow: InfoWindow(
-            title: stop.name,
-            snippet: snippet,
+            title: '🟢 Pickup: ${_currentPickup!.name}',
+            snippet: 'Child Boarding Point',
           ),
         ),
       );
     }
 
-    // Connect stops with a smooth polyline
+    // 2. Add intermediate route waypoints if available
+    if (_tripDetails != null) {
+      for (final stop in _tripDetails!.stops) {
+        if (stop.id != _currentPickup?.id && stop.id != _currentDropOff?.id) {
+          final pos = LatLng(stop.latitude, stop.longitude);
+          routePoints.add(pos);
+          _stopMarkers.add(
+            Marker(
+              markerId: MarkerId('stop_${stop.id}'),
+              position: pos,
+              zIndex: 3,
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+              infoWindow: InfoWindow(
+                title: stop.name,
+                snippet: 'Stop #${stop.order}',
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    // 3. Add Drop-off / Destination Marker (🔴 Red)
+    if (_currentDropOff != null) {
+      final dropOffPos = LatLng(_currentDropOff!.latitude, _currentDropOff!.longitude);
+      routePoints.add(dropOffPos);
+      _stopMarkers.add(
+        Marker(
+          markerId: const MarkerId('stop_destination'),
+          position: dropOffPos,
+          zIndex: 5,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(
+            title: '🏫 Drop-off: ${_currentDropOff!.name}',
+            snippet: 'Destination Stop',
+          ),
+        ),
+      );
+    }
+
+    // 4. Draw continuous polyline connecting pickup -> waypoints -> drop-off
     if (routePoints.length >= 2) {
       _polylines.add(
         Polyline(
@@ -183,30 +236,261 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       );
     });
 
-    // Smoothly pan camera to following bus coordinates
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLng(busLatLng),
-    );
-  }
-
-  void _recenterOnBus() {
-    if (_latestLocation != null && _mapController != null) {
+    // Auto-update camera location during the ride
+    if (_autoFollowBus && _mapController != null) {
+      _isProgrammaticCameraMove = true;
       _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          LatLng(_latestLocation!.latitude, _latestLocation!.longitude),
-          15.5,
-        ),
-      );
-    } else if (_tripDetails != null && _tripDetails!.stops.isNotEmpty) {
-      final firstStop = _tripDetails!.stops.first;
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(firstStop.latitude, firstStop.longitude), 14),
+        CameraUpdate.newLatLng(busLatLng),
       );
     }
   }
 
+  void _recenterOnBus() {
+    setState(() {
+      _autoFollowBus = true; // Re-enable auto tracking
+    });
+
+    if (_mapController != null) {
+      _isProgrammaticCameraMove = true;
+      if (_latestLocation != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(_latestLocation!.latitude, _latestLocation!.longitude),
+            15.5,
+          ),
+        );
+      } else if (_currentPickup != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(_currentPickup!.latitude, _currentPickup!.longitude),
+            14.5,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Open bottom sheet to change Pickup & Drop-Off locations
+  void _openChangeLocationsSheet() {
+    BusStop tempPickup = _currentPickup ?? _availablePickups.first;
+    BusStop tempDropOff = _currentDropOff ?? _availableDropOffs.first;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Change Route Places',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.grey),
+                        onPressed: () => Navigator.of(ctx).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Update pickup & drop-off to automatically adjust the map path and arrival time.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 1. Pickup Place Selection
+                  const Row(
+                    children: [
+                      Icon(Icons.location_on, color: Colors.green, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Child Pickup Place',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<BusStop>(
+                        isExpanded: true,
+                        value: _availablePickups.firstWhere(
+                          (p) => p.id == tempPickup.id,
+                          orElse: () => _availablePickups.first,
+                        ),
+                        items: _availablePickups.map((stop) {
+                          return DropdownMenuItem<BusStop>(
+                            value: stop,
+                            child: Text(
+                              stop.name,
+                              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (newStop) {
+                          if (newStop != null) {
+                            setModalState(() {
+                              tempPickup = newStop;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // 2. Drop-off Place Selection
+                  const Row(
+                    children: [
+                      Icon(Icons.flag_rounded, color: Colors.red, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Child Drop-off Place',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<BusStop>(
+                        isExpanded: true,
+                        value: _availableDropOffs.firstWhere(
+                          (d) => d.id == tempDropOff.id,
+                          orElse: () => _availableDropOffs.first,
+                        ),
+                        items: _availableDropOffs.map((stop) {
+                          return DropdownMenuItem<BusStop>(
+                            value: stop,
+                            child: Text(
+                              stop.name,
+                              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (newStop) {
+                          if (newStop != null) {
+                            setModalState(() {
+                              tempDropOff = newStop;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Confirm Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+
+                        // 1. Update state immediately
+                        setState(() {
+                          _currentPickup = tempPickup;
+                          _currentDropOff = tempDropOff;
+                          _buildStopsAndRoute();
+                        });
+
+                        // 2. Animate camera to fit new pickup & dropoff
+                        _isProgrammaticCameraMove = true;
+                        _mapController?.animateCamera(
+                          CameraUpdate.newLatLngZoom(
+                            LatLng(tempPickup.latitude, tempPickup.longitude),
+                            14,
+                          ),
+                        );
+
+                        // 3. Notify backend API
+                        await _apiService.updateStops(
+                          tripId: widget.tripId,
+                          pickup: {
+                            'name': tempPickup.name,
+                            'latitude': tempPickup.latitude,
+                            'longitude': tempPickup.longitude,
+                          },
+                          destination: {
+                            'name': tempDropOff.name,
+                            'latitude': tempDropOff.latitude,
+                            'longitude': tempDropOff.longitude,
+                          },
+                        );
+
+                        // 4. Refresh ETA
+                        _refreshETA();
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('📍 Route updated: ${tempPickup.name} ➔ ${tempDropOff.name}'),
+                              backgroundColor: const Color(0xFF0D6B5D),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0D6B5D),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Apply Changes to Map',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   String _getTimeAgoString() {
-    if (_latestLocation == null) return 'Waiting for GPS signal...';
+    if (_latestLocation == null) return 'Waiting for GPS...';
     final difference = DateTime.now().difference(_latestLocation!.updatedAt);
     if (difference.inSeconds < 10) {
       return 'Live • just now';
@@ -221,7 +505,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     if (!_isTripActive) return Colors.grey;
     if (_latestLocation == null) return Colors.orange;
     final diff = DateTime.now().difference(_latestLocation!.updatedAt);
-    if (diff.inSeconds <= 15) return const Color(0xFF22C55E); // Bright Green
+    if (diff.inSeconds <= 15) return const Color(0xFF22C55E);
     if (diff.inMinutes <= 2) return Colors.orange;
     return Colors.red;
   }
@@ -302,6 +586,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
+            onCameraMoveStarted: () {
+              if (_isProgrammaticCameraMove) return;
+              // Pause auto-following only if the user manually drags the map
+              if (_autoFollowBus) {
+                setState(() {
+                  _autoFollowBus = false;
+                });
+              }
+            },
+            onCameraIdle: () {
+              _isProgrammaticCameraMove = false;
+            },
             onMapCreated: (controller) {
               _mapController = controller;
               if (_latestLocation != null) {
@@ -310,17 +606,80 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             },
           ),
 
+          // Top Floating Action Pill: Auto-Follow Indicator & Change Places Button
+          Positioned(
+            top: 14,
+            left: 16,
+            right: 16,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Change Pickup/Drop-off button
+                ElevatedButton.icon(
+                  onPressed: _openChangeLocationsSheet,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF0D6B5D),
+                    elevation: 4,
+                    shadowColor: Colors.black26,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_location_alt, size: 18, color: Color(0xFF0D6B5D)),
+                  label: const Text(
+                    'Change Places',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                ),
+
+                // Auto-follow indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _autoFollowBus ? Icons.sync : Icons.sync_disabled,
+                        size: 14,
+                        color: _autoFollowBus ? Colors.green : Colors.grey,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        _autoFollowBus ? 'Auto-Tracking' : 'Free Explore',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _autoFollowBus ? Colors.green.shade700 : Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // Map Control Buttons (Recenter, Zoom In/Out)
           Positioned(
             right: 16,
-            bottom: 270,
+            bottom: 275,
             child: Column(
               children: [
                 FloatingActionButton.small(
                   heroTag: 'recenter_btn',
-                  backgroundColor: Colors.white,
+                  backgroundColor: _autoFollowBus ? const Color(0xFF0D6B5D) : Colors.white,
                   onPressed: _recenterOnBus,
-                  child: const Icon(Icons.my_location, color: Color(0xFF0D6B5D)),
+                  child: Icon(
+                    Icons.my_location,
+                    color: _autoFollowBus ? Colors.white : const Color(0xFF0D6B5D),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
@@ -340,7 +699,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
           ),
 
-          // Bottom Sheet with Real ETA, Driver & Vehicle Info
+          // Bottom Sheet with Real ETA, Driver, Vehicle & Places Info
           Positioned(
             left: 16,
             right: 16,
@@ -378,7 +737,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                _isTripActive ? 'ON BOARD' : 'COMPLETED',
+                                _rideStatus,
                                 style: const TextStyle(
                                   color: Color(0xFF0D6B5D),
                                   fontWeight: FontWeight.bold,
@@ -409,9 +768,45 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
+
+                    // Pickup and Drop-off summary strip
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.trip_origin, size: 14, color: Colors.green),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _currentPickup?.name ?? 'Pickup',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward, size: 13, color: Colors.grey),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.location_on, size: 14, color: Colors.red),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _currentDropOff?.name ?? 'School',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
                     const Divider(height: 1, color: Color(0xFFF1F5F9)),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
 
                     // Driver & Vehicle Details (Dynamic from Backend)
                     Row(
@@ -465,12 +860,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ],
                     ),
 
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
 
                     // Navigation to Journey History
                     SizedBox(
                       width: double.infinity,
-                      height: 42,
+                      height: 40,
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF0D6B5D),
@@ -482,7 +877,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         icon: const Icon(Icons.history, size: 18),
                         label: const Text(
                           'View Full Journey Timeline',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                         ),
                         onPressed: () {
                           Navigator.of(context).push(
