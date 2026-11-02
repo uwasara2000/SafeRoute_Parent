@@ -57,6 +57,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   Timer? _statusTicker;
   Timer? _etaTicker;
 
+  // Real-time route motion simulation along active road polyline
+  List<LatLng> _activeRoadPoints = [];
+  int _activeRoadIndex = 0;
+  Timer? _realtimeMotionTimer;
+  bool _isLiveSimulating = true;
+  double _currentSpeedKmh = 36.0;
+  RoadRouteResult? _currentRoadResult;
+
   // All available Pickup Places across Sri Lanka
   List<BusStop> get _availablePickups => RouteGeneratorService.allPickupPlacesInSriLanka
       .map((p) => p.toBusStop(order: 1))
@@ -297,6 +305,150 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     });
 
     _fitCameraToRoute();
+
+    // 5. Start real-time movement of the child along this active road route
+    _startRealtimeRouteMovement(roadResult);
+  }
+
+  /// Animate and progress the child along the real road polyline in real-time
+  void _startRealtimeRouteMovement(RoadRouteResult roadResult) {
+    _realtimeMotionTimer?.cancel();
+    _currentRoadResult = roadResult;
+    _activeRoadPoints = List<LatLng>.from(roadResult.points);
+    _activeRoadIndex = 0;
+
+    if (_activeRoadPoints.isEmpty) return;
+
+    final initialPos = _activeRoadPoints.first;
+    final initialNext = _activeRoadPoints.length > 1 ? _activeRoadPoints[1] : initialPos;
+    final initialBearing = RouteGeneratorService.calculateBearing(initialPos, initialNext);
+
+    _applySimulatedProgress(
+      position: initialPos,
+      heading: initialBearing,
+      speedKmh: 35.0,
+      index: 0,
+    );
+
+    // Compute step size: 100-140 steps across route, minimum 1 point per tick
+    final totalPts = _activeRoadPoints.length;
+    final stepSize = (totalPts / 120).ceil().clamp(1, 6);
+
+    _realtimeMotionTimer = Timer.periodic(const Duration(milliseconds: 1400), (timer) {
+      if (!mounted || !_isLiveSimulating || _activeRoadPoints.isEmpty) return;
+
+      if (_activeRoadIndex + stepSize < _activeRoadPoints.length) {
+        _activeRoadIndex += stepSize;
+      } else {
+        // Reached destination!
+        _activeRoadIndex = _activeRoadPoints.length - 1;
+        timer.cancel();
+
+        _applySimulatedProgress(
+          position: _activeRoadPoints.last,
+          heading: 0,
+          speedKmh: 0,
+          index: _activeRoadIndex,
+        );
+
+        // Pause for 6 seconds at the destination, then restart journey from pickup
+        Future.delayed(const Duration(seconds: 6), () {
+          if (mounted && _isLiveSimulating && _currentRoadResult != null) {
+            _startRealtimeRouteMovement(_currentRoadResult!);
+          }
+        });
+        return;
+      }
+
+      final currPos = _activeRoadPoints[_activeRoadIndex];
+      final nextIdx = (_activeRoadIndex + 1 < _activeRoadPoints.length) ? _activeRoadIndex + 1 : _activeRoadIndex;
+      final nextPos = _activeRoadPoints[nextIdx];
+      final heading = RouteGeneratorService.calculateBearing(currPos, nextPos);
+
+      // Fluctuate speed realistically between 32 and 46 km/h
+      _currentSpeedKmh = 32.0 + (_activeRoadIndex % 15);
+
+      _applySimulatedProgress(
+        position: currPos,
+        heading: heading,
+        speedKmh: _currentSpeedKmh,
+        index: _activeRoadIndex,
+      );
+    });
+  }
+
+  void _applySimulatedProgress({
+    required LatLng position,
+    required double heading,
+    required double speedKmh,
+    required int index,
+  }) {
+    if (!mounted) return;
+
+    final childName = _activeChild?.name ?? 'Child';
+    final vehicleNo = _activeChild?.vehicleNumber ?? (_tripDetails?.vehicle.plateNumber ?? 'School Bus');
+    final totalPts = _activeRoadPoints.length;
+    final remainingRatio = totalPts > 1 ? (1.0 - (index / totalPts)).clamp(0.0, 1.0) : 0.0;
+    final totalDistKm = _currentRoadResult?.distanceKm ?? 12.0;
+    final totalDurationMins = _currentRoadResult?.durationMinutes ?? 25;
+
+    final remainingDistKm = (totalDistKm * remainingRatio).toStringAsFixed(1);
+    final remainingMinutes = (totalDurationMins * remainingRatio).ceil();
+
+    final isAtDestination = index >= totalPts - 1;
+    final statusText = isAtDestination ? 'ARRIVED AT SCHOOL' : 'ON BOARD';
+
+    setState(() {
+      _rideStatus = statusText;
+
+      // Update ETA info dynamically as child moves
+      _latestEta = EtaInfo(
+        etaSeconds: remainingMinutes * 60,
+        etaMinutes: remainingMinutes,
+        distanceMeters: ((totalDistKm * remainingRatio) * 1000).round(),
+        distanceKm: remainingDistKm,
+        calculatedAt: DateTime.now(),
+      );
+
+      // Update live Bus Marker
+      _busMarker = Marker(
+        markerId: const MarkerId('school_bus'),
+        position: position,
+        rotation: heading,
+        flat: true,
+        anchor: const Offset(0.5, 0.5),
+        zIndex: 10,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        infoWindow: InfoWindow(
+          title: '🚌 $childName\'s Bus ($vehicleNo)',
+          snippet: isAtDestination
+              ? 'Safely arrived at ${_currentDropOff?.name ?? "School"}'
+              : '${speedKmh.toStringAsFixed(0)} km/h • $remainingMinutes min ($remainingDistKm km left)',
+        ),
+      );
+    });
+
+    // Auto-follow camera keeps child centered
+    if (_autoFollowBus && _mapController != null) {
+      _isProgrammaticCameraMove = true;
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLng(position),
+      );
+    }
+
+    // Sync live location to Firebase Realtime Database
+    final tripId = _getChildTripId();
+    _trackingService.updateLocation(
+      tripId,
+      BusLocation(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        heading: heading,
+        speedMps: speedKmh / 3.6,
+        accuracyM: 4.0,
+        updatedAt: DateTime.now(),
+      ),
+    );
   }
 
   void _fitCameraToRoute() {
@@ -383,6 +535,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   void _applyLocationUpdate(BusLocation location) {
     if (!mounted) return;
+    if (_isLiveSimulating && _activeRoadPoints.isNotEmpty) return;
 
     final busLatLng = LatLng(location.latitude, location.longitude);
 
@@ -972,6 +1125,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     _childrenSubscription?.cancel();
     _statusTicker?.cancel();
     _etaTicker?.cancel();
+    _realtimeMotionTimer?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -1129,32 +1283,92 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ),
                     ),
 
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.95),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _autoFollowBus ? Icons.sync : Icons.sync_disabled,
-                            size: 14,
-                            color: _autoFollowBus ? Colors.green : Colors.grey,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            _autoFollowBus ? 'Auto-Tracking' : 'Free Explore',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: _autoFollowBus ? Colors.green.shade700 : Colors.grey.shade700,
+                    Row(
+                      children: [
+                        // Live Simulation Play/Pause pill
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _isLiveSimulating = !_isLiveSimulating;
+                              if (_isLiveSimulating && _currentRoadResult != null) {
+                                _startRealtimeRouteMovement(_currentRoadResult!);
+                              } else {
+                                _realtimeMotionTimer?.cancel();
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _isLiveSimulating ? const Color(0xFFE2F4F0) : Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _isLiveSimulating ? Icons.directions_bus : Icons.pause_circle_outline,
+                                  size: 14,
+                                  color: const Color(0xFF0D6B5D),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _isLiveSimulating
+                                      ? 'Live (${_currentSpeedKmh.toStringAsFixed(0)} km/h)'
+                                      : 'Paused',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF0D6B5D),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+
+                        const SizedBox(width: 8),
+
+                        // Auto-Tracking Toggle Pill
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _autoFollowBus = !_autoFollowBus;
+                              if (_autoFollowBus) _recenterOnBus();
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.95),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  _autoFollowBus ? Icons.sync : Icons.sync_disabled,
+                                  size: 14,
+                                  color: _autoFollowBus ? Colors.green : Colors.grey,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _autoFollowBus ? 'Auto-Follow' : 'Free Explore',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _autoFollowBus ? Colors.green.shade700 : Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1233,7 +1447,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                child?.status ?? _rideStatus,
+                                _rideStatus,
                                 style: const TextStyle(
                                   color: Color(0xFF0D6B5D),
                                   fontWeight: FontWeight.bold,
@@ -1251,7 +1465,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                             const SizedBox(width: 5),
                             Text(
                               _latestEta != null
-                                  ? 'Arriving in ${_latestEta!.etaMinutes} min • ${_latestEta!.distanceKm} km'
+                                  ? (_rideStatus == 'ARRIVED AT SCHOOL'
+                                      ? 'Arrived at destination'
+                                      : 'Arriving in ${_latestEta!.etaMinutes} min • ${_latestEta!.distanceKm} km')
                                   : (child?.eta ?? 'Calculating ETA...'),
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,

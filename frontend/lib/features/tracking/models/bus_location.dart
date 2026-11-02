@@ -30,5 +30,16 @@ class BusLocation {
 
   bool get isValid =>
       latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'latitude': latitude,
+      'longitude': longitude,
+      if (heading != null) 'heading': heading,
+      if (speedMps != null) 'speedMps': speedMps,
+      if (accuracyM != null) 'accuracyM': accuracyM,
+      'updatedAt': updatedAt.millisecondsSinceEpoch,
+    };
+  }
 }
 

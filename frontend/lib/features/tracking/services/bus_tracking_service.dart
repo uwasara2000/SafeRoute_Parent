@@ -32,5 +32,15 @@ class BusTrackingService {
       return val is bool ? val : true;
     });
   }
+
+  /// Update real-time location in Firebase Realtime Database
+  Future<void> updateLocation(String tripId, BusLocation location) async {
+    try {
+      final ref = _database.ref('liveTrips/$tripId/location');
+      await ref.set(location.toMap());
+    } catch (_) {
+      // Ignore network errors during local simulation
+    }
+  }
 }
 

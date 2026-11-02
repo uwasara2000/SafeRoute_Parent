@@ -484,4 +484,19 @@ class RouteGeneratorService {
       ),
     ];
   }
+
+  /// Calculate compass bearing (degrees: 0 - 360) from start to end coordinate
+  static double calculateBearing(LatLng start, LatLng end) {
+    final startLat = start.latitude * (pi / 180.0);
+    final startLng = start.longitude * (pi / 180.0);
+    final endLat = end.latitude * (pi / 180.0);
+    final endLng = end.longitude * (pi / 180.0);
+
+    final dLng = endLng - startLng;
+    final y = sin(dLng) * cos(endLat);
+    final x = cos(startLat) * sin(endLat) - sin(startLat) * cos(endLat) * cos(dLng);
+
+    final brng = atan2(y, x) * (180.0 / pi);
+    return (brng + 360.0) % 360.0;
+  }
 }
