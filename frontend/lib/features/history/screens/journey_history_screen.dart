@@ -311,3 +311,4 @@ class _JourneyHistoryScreenState extends State<JourneyHistoryScreen> {
     );
   }
 }
+

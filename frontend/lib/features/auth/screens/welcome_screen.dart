@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../widgets/safe_route_logo.dart';
 import 'login_screen.dart';
+import '../../home/screens/home_screen.dart';
 import 'parent_register_screen.dart';
 
 /// Screen 3: Welcome Screen
@@ -101,6 +102,29 @@ class WelcomeScreen extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const HomeScreen(parentName: 'Nadeesha'),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.arrow_forward, color: AppColors.primaryTeal, size: 18),
+                  label: const Text(
+                    'Explore Dashboard (Demo Mode)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primaryTeal,
                     ),
                   ),
                 ),

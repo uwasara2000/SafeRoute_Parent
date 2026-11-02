@@ -259,6 +259,35 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                          builder: (_) => const HomeScreen(parentName: 'Nadeesha'),
+                        ),
+                        (route) => false,
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryTeal,
+                      side: const BorderSide(color: Color(0xFFD1E5E1)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Quick Demo Login (Skip to Dashboard)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 28),
 
                 // Bottom register link
