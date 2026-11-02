@@ -38,6 +38,25 @@ class ChildrenService {
     debugPrint('[ChildrenService] Deleted child: $childId for parent: $uid');
   }
 
+  /// Update child's registered pickup & drop-off locations in Cloud Firestore
+  Future<void> updateChildLocations({
+    required String childId,
+    required String pickupLocation,
+    required String dropOffLocation,
+  }) async {
+    if (childId.isEmpty) return;
+    try {
+      await _firestore.collection('children').doc(childId).update({
+        'pickupLocation': pickupLocation,
+        'dropOffLocation': dropOffLocation,
+        'lastKnownLocation': 'Pickup: $pickupLocation · School: $dropOffLocation',
+      });
+      debugPrint('[ChildrenService] Updated locations for child: $childId in Firestore');
+    } catch (e) {
+      debugPrint('[ChildrenService] Error updating child locations: $e');
+    }
+  }
+
   /// Convenience method to seed demo two children for testing Sri Lanka dual-school tracking
   Future<void> seedTwoDemoChildren() async {
     final uid = currentUserId;

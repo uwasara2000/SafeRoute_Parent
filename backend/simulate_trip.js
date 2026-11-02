@@ -2,10 +2,31 @@ const axios = require('axios');
 require('dotenv').config();
 
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || 'https://track-my-kid-dae5b-default-rtdb.firebaseio.com';
-const TRIP_ID = 'trip_001';
 
-// High-resolution GPS waypoints from Wattala -> Kelaniya -> Borella -> Gateway College, Rajagiriya
-const waypoints = [
+// 1. Route 08: Nawala -> Narahenpita -> Torrington -> Royal College, Colombo 07 (Amaya Silva)
+const route08Waypoints = [
+  { lat: 6.8960, lng: 79.8870, name: 'Nawala Road stop (Pickup)' },
+  { lat: 6.8975, lng: 79.8825, name: 'Nawala Bridge' },
+  { lat: 6.8990, lng: 79.8780, name: 'Narahenpita Junction' },
+  { lat: 6.9005, lng: 79.8730, name: 'Independence Avenue' },
+  { lat: 6.9020, lng: 79.8680, name: 'Torrington Square' },
+  { lat: 6.9035, lng: 79.8650, name: 'Reid Avenue' },
+  { lat: 6.9044, lng: 79.8622, name: 'Royal College, Colombo 07 (Destination)' }
+];
+
+// 2. Route 14: Rajagiriya -> Cotta Road -> Borella -> Maradana -> Ananda College (Dineth Silva)
+const route14Waypoints = [
+  { lat: 6.9110, lng: 79.8890, name: 'Rajagiriya Junction stop (Pickup)' },
+  { lat: 6.9125, lng: 79.8845, name: 'Cotta Road East' },
+  { lat: 6.9140, lng: 79.8800, name: 'Cotta Road Mid' },
+  { lat: 6.9160, lng: 79.8750, name: 'Borella Roundabout' },
+  { lat: 6.9230, lng: 79.8730, name: 'Dean\'s Road' },
+  { lat: 6.9270, lng: 79.8715, name: 'Maradana Road' },
+  { lat: 6.9298, lng: 79.8705, name: 'Ananda College, Colombo 10 (Destination)' }
+];
+
+// 3. Route #12 / trip_001: Wattala -> Kelaniya -> Borella -> Gateway College
+const trip001Waypoints = [
   { lat: 6.9890, lng: 79.8910, name: 'Wattala Junction (Pickup)' },
   { lat: 6.9810, lng: 79.8930, name: 'Negombo Road South' },
   { lat: 6.9730, lng: 79.8970, name: 'Approaching Peliyagoda' },
@@ -23,7 +44,7 @@ const waypoints = [
   { lat: 6.9080, lng: 79.8970, name: 'Gateway College, Rajagiriya (Destination)' }
 ];
 
-// Helper: Calculate compass bearing between two coordinates
+// Calculate compass bearing
 function calculateBearing(startLat, startLng, destLat, destLng) {
   const startLatRad = (startLat * Math.PI) / 180;
   const startLngRad = (startLng * Math.PI) / 180;
@@ -39,13 +60,17 @@ function calculateBearing(startLat, startLng, destLat, destLng) {
   return (brng + 360) % 360;
 }
 
-let currentIndex = 0;
+const simulators = [
+  { id: 'route_08', name: 'Route 08 (Amaya - Royal College)', waypoints: route08Waypoints, index: 0 },
+  { id: 'route_14', name: 'Route 14 (Dineth - Ananda College)', waypoints: route14Waypoints, index: 0 },
+  { id: 'trip_001', name: 'Route #12 (Wattala - Gateway)', waypoints: trip001Waypoints, index: 0 }
+];
 
-async function sendGpsUpdate() {
-  const current = waypoints[currentIndex];
-  const next = waypoints[(currentIndex + 1) % waypoints.length];
+async function updateRouteGps(sim) {
+  const current = sim.waypoints[sim.index];
+  const next = sim.waypoints[(sim.index + 1) % sim.waypoints.length];
   const heading = Math.round(calculateBearing(current.lat, current.lng, next.lat, next.lng));
-  const speedMps = (7.5 + Math.random() * 3.5).toFixed(1); // ~27 - 40 km/h
+  const speedMps = (7.0 + Math.random() * 4.0).toFixed(1);
 
   const payload = {
     latitude: current.lat,
@@ -57,34 +82,27 @@ async function sendGpsUpdate() {
   };
 
   try {
-    const url = `${DATABASE_URL}/liveTrips/${TRIP_ID}/location.json`;
+    const url = `${DATABASE_URL}/liveTrips/${sim.id}/location.json`;
     await axios.put(url, payload, { timeout: 4000 });
-
     const timeStr = new Date().toLocaleTimeString();
-    console.log(
-      `[${timeStr}] 🚌 Step ${currentIndex + 1}/${waypoints.length} -> ${current.name} | Lat: ${current.lat}, Lng: ${current.lng} | Heading: ${heading}° | Speed: ${(speedMps * 3.6).toFixed(0)} km/h`
-    );
+    console.log(`[${timeStr}] 🚌 ${sim.id} -> ${current.name} | Lat: ${current.lat}, Lng: ${current.lng} | ${(speedMps * 3.6).toFixed(0)} km/h`);
   } catch (error) {
-    console.error('❌ GPS Update failed:', error.message);
+    console.error(`❌ ${sim.id} update failed:`, error.message);
   }
 
-  currentIndex = (currentIndex + 1) % waypoints.length;
+  sim.index = (sim.index + 1) % sim.waypoints.length;
+}
+
+async function runSimulations() {
+  for (const sim of simulators) {
+    await updateRouteGps(sim);
+  }
 }
 
 console.log('====================================================');
-console.log('🚀 School Bus GPS Stream Simulator Started');
-console.log(`📡 Trip ID: ${TRIP_ID}`);
-console.log(`🌐 Target:  ${DATABASE_URL}`);
-console.log('📍 Route:    Wattala -> Kelaniya -> Borella -> Gateway College');
-console.log('⏱️ Interval: Every 3.5 seconds');
-console.log('====================================================\n');
+console.log('🚀 Multi-Route School Bus GPS Simulator Started');
+console.log('📡 Streaming routes: route_08, route_14, trip_001');
+console.log('====================================================');
 
-// Set trip active
-axios.put(`${DATABASE_URL}/liveTrips/${TRIP_ID}/active.json`, true).catch(() => {});
-
-// Push initial coordinate immediately
-sendGpsUpdate();
-
-// Stream continuous updates every 3.5 seconds
-setInterval(sendGpsUpdate, 3500);
-
+runSimulations();
+setInterval(runSimulations, 3500);

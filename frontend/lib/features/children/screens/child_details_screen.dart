@@ -1,3 +1,4 @@
+import '../../tracking/screens/live_tracking_screen.dart';
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../models/child_model.dart';
@@ -190,6 +191,36 @@ class ChildDetailsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
+              // "Track Live Bus Route" Button
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LiveTrackingScreen(initialChild: child),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.directions_bus_rounded, color: Colors.white),
+                  label: Text(
+                    'Track ' + child.name + '\'s Bus',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D6B5D),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               // "Request Information Change" Button
               SizedBox(
                 width: double.infinity,

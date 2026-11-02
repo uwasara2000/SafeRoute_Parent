@@ -35,6 +35,72 @@ const trips = {
       { id: 'evt_2', type: 'CHILD_BOARDED', title: 'Child Boarded', timestamp: new Date(Date.now() - 25 * 60000).toISOString(), description: 'Your child boarded at Wattala Junction' },
       { id: 'evt_3', type: 'STOP_PASSED', title: 'Passed Kelaniya', timestamp: new Date(Date.now() - 10 * 60000).toISOString(), description: 'Bus departed stop #2 on schedule' }
     ]
+  },
+  route_08: {
+    tripId: 'route_08',
+    routeId: 'route_08',
+    routeName: 'Route 08 - Nawala to Royal College',
+    active: true,
+    driver: {
+      driverId: 'driver_sunil',
+      name: 'Sunil Weerasinghe',
+      phone: '+94 71 892 3411',
+      licenseNo: 'B829103'
+    },
+    vehicle: {
+      vehicleId: 'bus_NB_4821',
+      plateNumber: 'NB-4821',
+      model: 'Toyota Coaster 28-Seater',
+      capacity: 28
+    },
+    destination: {
+      name: 'Royal College, Colombo 07',
+      latitude: 6.9044,
+      longitude: 79.8622
+    },
+    stops: [
+      { id: 'stop_1', name: 'Nawala Road stop', latitude: 6.8960, longitude: 79.8870, order: 1 },
+      { id: 'stop_2', name: 'Narahenpita Junction', latitude: 6.8990, longitude: 79.8780, order: 2 },
+      { id: 'stop_3', name: 'Torrington Square', latitude: 6.9020, longitude: 79.8680, order: 3 },
+      { id: 'stop_4', name: 'Royal College main gate', latitude: 6.9044, longitude: 79.8622, order: 4 }
+    ],
+    events: [
+      { id: 'evt_r8_1', type: 'TRIP_STARTED', title: 'Trip Started', timestamp: new Date(Date.now() - 20 * 60000).toISOString(), description: 'Driver Sunil Weerasinghe started morning route 08' },
+      { id: 'evt_r8_2', type: 'CHILD_BOARDED', title: 'Child Boarded', timestamp: new Date(Date.now() - 12 * 60000).toISOString(), description: 'Amaya boarded at Nawala Road stop' }
+    ]
+  },
+  route_14: {
+    tripId: 'route_14',
+    routeId: 'route_14',
+    routeName: 'Route 14 - Rajagiriya to Ananda College',
+    active: true,
+    driver: {
+      driverId: 'driver_gamini',
+      name: 'Gamini Perera',
+      phone: '+94 77 441 9022',
+      licenseNo: 'B391048'
+    },
+    vehicle: {
+      vehicleId: 'bus_WP_3156',
+      plateNumber: 'WP-3156',
+      model: 'Mitsubishi Rosa 30-Seater',
+      capacity: 30
+    },
+    destination: {
+      name: 'Ananda College, Colombo 10',
+      latitude: 6.9298,
+      longitude: 79.8705
+    },
+    stops: [
+      { id: 'stop_1', name: 'Rajagiriya Junction stop', latitude: 6.9110, longitude: 79.8890, order: 1 },
+      { id: 'stop_2', name: 'Cotta Road East', latitude: 6.9130, longitude: 79.8800, order: 2 },
+      { id: 'stop_3', name: 'Borella Roundabout', latitude: 6.9160, longitude: 79.8750, order: 3 },
+      { id: 'stop_4', name: 'Ananda College primary gate', latitude: 6.9298, longitude: 79.8705, order: 4 }
+    ],
+    events: [
+      { id: 'evt_r14_1', type: 'TRIP_STARTED', title: 'Trip Started', timestamp: new Date(Date.now() - 15 * 60000).toISOString(), description: 'Driver Gamini started morning route 14' },
+      { id: 'evt_r14_2', type: 'CHILD_BOARDED', title: 'Child Boarded', timestamp: new Date(Date.now() - 8 * 60000).toISOString(), description: 'Dineth boarded at Rajagiriya Junction' }
+    ]
   }
 };
 
@@ -43,8 +109,34 @@ class TripService {
    * Fetch trip details
    */
   async getTrip(tripId) {
-    const trip = trips[tripId];
-    if (!trip) return null;
+    let trip = trips[tripId];
+    if (!trip) {
+      // Dynamic fallback for any child route
+      trip = {
+        tripId,
+        routeId: tripId,
+        routeName: `Route - ${tripId}`,
+        active: true,
+        driver: {
+          driverId: 'driver_default',
+          name: 'Sunil Weerasinghe',
+          phone: '+94 71 892 3411',
+          licenseNo: 'B829103'
+        },
+        vehicle: {
+          vehicleId: `bus_${tripId}`,
+          plateNumber: 'NB-4821',
+          model: 'Toyota Coaster 28-Seater',
+          capacity: 28
+        },
+        destination: {
+          name: 'School Destination',
+          latitude: 6.9044,
+          longitude: 79.8622
+        },
+        stops: []
+      };
+    }
 
     try {
       const activeState = await firebaseRest.get(`liveTrips/${tripId}/active`);
@@ -148,8 +240,11 @@ class TripService {
    * Update pickup or drop-off location for a trip
    */
   async updateTripStops(tripId, { pickup, destination }) {
-    const trip = trips[tripId];
-    if (!trip) return null;
+    let trip = trips[tripId];
+    if (!trip) {
+      trip = await this.getTrip(tripId);
+      trips[tripId] = trip;
+    }
 
     if (destination) {
       trip.destination = {
@@ -157,7 +252,6 @@ class TripService {
         latitude: Number(destination.latitude),
         longitude: Number(destination.longitude)
       };
-      // Also update the last stop
       const lastStopIndex = trip.stops.length - 1;
       if (lastStopIndex >= 0) {
         trip.stops[lastStopIndex] = {

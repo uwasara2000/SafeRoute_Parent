@@ -535,7 +535,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const LiveTrackingScreen(tripId: 'trip_001'),
+                    builder: (_) => LiveTrackingScreen(initialChild: child),
                   ),
                 );
               },
@@ -586,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const LiveTrackingScreen(tripId: 'trip_001'),
+                    builder: (_) => LiveTrackingScreen(initialChild: child),
                   ),
                 );
               },
@@ -898,7 +898,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (index == 1) {
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => const LiveTrackingScreen(tripId: 'trip_001'),
+                builder: (_) => LiveTrackingScreen(
+                  initialChild: _selectedChild ?? (_allChildren.isNotEmpty ? _allChildren.first : null),
+                ),
               ),
             );
           } else if (index == 2) {
