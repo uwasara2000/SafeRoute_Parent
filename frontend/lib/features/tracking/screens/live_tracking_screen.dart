@@ -96,6 +96,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     _childrenSubscription = _childrenService.getChildrenStream().listen((children) {
       if (!mounted) return;
 
+      ChildModel? childToBuild;
       setState(() {
         if (children.isNotEmpty) {
           _registeredChildren = children;
@@ -110,7 +111,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         // If no active child was chosen or active child is not in the list, set first
         if (_activeChild == null) {
           _activeChild = _registeredChildren.first;
-          _buildAutoRouteForChild(_activeChild!);
+          childToBuild = _activeChild;
         } else {
           // Re-sync with latest data from Firestore if active child was updated
           final match = _registeredChildren.firstWhere(
@@ -118,9 +119,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             orElse: () => _activeChild!,
           );
           _activeChild = match;
-          _buildAutoRouteForChild(_activeChild!);
+          childToBuild = _activeChild;
         }
       });
+
+      if (childToBuild != null) {
+        _buildAutoRouteForChild(childToBuild!);
+      }
     });
   }
 
@@ -129,11 +134,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     setState(() {
       _activeChild = child;
       _rideStatus = child.status;
-      _buildAutoRouteForChild(child);
     });
 
-    // Fit camera to the newly selected child's route
-    _fitCameraToRoute();
+    _buildAutoRouteForChild(child);
 
     // Refresh trip & ETA for this child's route
     _loadTripDetailsAndStops();
@@ -150,11 +153,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   }
 
   /// Automatically generate stops, markers and polyline road route tailored for this child
-  void _buildAutoRouteForChild(ChildModel child) {
+  Future<void> _buildAutoRouteForChild(ChildModel child) async {
     final pickupPos = RouteGeneratorService.geocodePlace(child.pickupLocation);
     final schoolPos = RouteGeneratorService.geocodePlace(child.school, isSchool: true);
 
-    _buildRouteFromPoints(
+    await _buildRouteFromPoints(
       pickupPos: pickupPos,
       destinationPos: schoolPos,
       pickupName: child.pickupLocation,
@@ -164,15 +167,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     );
   }
 
-  /// Build markers, polyline and route stops directly from exact coordinates
-  void _buildRouteFromPoints({
+  /// Build markers, polyline and route stops directly from exact coordinates using real road snapping
+  Future<void> _buildRouteFromPoints({
     required LatLng pickupPos,
     required LatLng destinationPos,
     required String pickupName,
     required String destinationName,
     String? childName,
     String? routeName,
-  }) {
+  }) async {
     _currentPickup = BusStop(
       id: 'pickup_${DateTime.now().millisecondsSinceEpoch}',
       name: pickupName,
@@ -189,81 +192,111 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       order: 99,
     );
 
-    _stopMarkers.clear();
-    _polylines.clear();
-
     final cName = childName ?? _activeChild?.name ?? 'Child';
     final rName = routeName ?? _activeChild?.route ?? 'Route';
 
-    // 1. Add 🟢 Green Pickup Marker
-    _stopMarkers.add(
-      Marker(
-        markerId: const MarkerId('stop_pickup'),
-        position: pickupPos,
-        zIndex: 5,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(
-          title: '🟢 $cName\'s Pickup',
-          snippet: pickupName,
-        ),
-      ),
-    );
+    // 1. Immediately display pickup & destination markers
+    setState(() {
+      _stopMarkers.clear();
+      _polylines.clear();
 
-    // 2. Add 🏫 Red School Destination Marker
-    _stopMarkers.add(
-      Marker(
-        markerId: const MarkerId('stop_destination'),
-        position: destinationPos,
-        zIndex: 5,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow: InfoWindow(
-          title: '🏫 $cName\'s School',
-          snippet: destinationName,
-        ),
-      ),
-    );
-
-    // 3. Generate Auto-Route curved street polyline
-    final routePoints = RouteGeneratorService.generateAutoRoute(
-      pickup: pickupPos,
-      destination: destinationPos,
-    );
-
-    // 4. Add intermediate waypoints for context
-    final intermediateStops = RouteGeneratorService.generateIntermediateStops(
-      pickup: pickupPos,
-      destination: destinationPos,
-      pickupName: pickupName,
-      schoolName: destinationName,
-    );
-
-    for (int i = 1; i < intermediateStops.length - 1; i++) {
-      final stop = intermediateStops[i];
       _stopMarkers.add(
         Marker(
-          markerId: MarkerId('stop_waypoint_$i'),
-          position: LatLng(stop.latitude, stop.longitude),
-          zIndex: 3,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          markerId: const MarkerId('stop_pickup'),
+          position: pickupPos,
+          zIndex: 5,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           infoWindow: InfoWindow(
-            title: stop.name,
-            snippet: 'Waypoint #$i along $rName',
+            title: '🟢 $cName\'s Pickup',
+            snippet: pickupName,
           ),
         ),
       );
-    }
 
-    _polylines.add(
-      Polyline(
-        polylineId: PolylineId('auto_route_${DateTime.now().millisecondsSinceEpoch}'),
-        points: routePoints,
-        color: const Color(0xFF0D6B5D),
-        width: 5,
-        startCap: Cap.roundCap,
-        endCap: Cap.roundCap,
-        jointType: JointType.round,
-      ),
+      _stopMarkers.add(
+        Marker(
+          markerId: const MarkerId('stop_destination'),
+          position: destinationPos,
+          zIndex: 5,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(
+            title: '🏫 $cName\'s School',
+            snippet: destinationName,
+          ),
+        ),
+      );
+    });
+
+    _fitCameraToRoute();
+
+    // 2. Fetch real road geometry (hundreds of exact curved street coordinates)
+    final roadResult = await RouteGeneratorService.fetchRealRoadRoute(
+      pickup: pickupPos,
+      destination: destinationPos,
     );
+
+    if (!mounted) return;
+
+    setState(() {
+      _polylines.clear();
+      _polylines.add(
+        Polyline(
+          polylineId: PolylineId('real_road_${DateTime.now().millisecondsSinceEpoch}'),
+          points: roadResult.points,
+          color: const Color(0xFF0D6B5D),
+          width: 6,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
+        ),
+      );
+
+      // 3. Add intermediate waypoints positioned directly along the real road path
+      final pts = roadResult.points;
+      if (pts.length >= 6) {
+        final waypoint1Pos = pts[pts.length ~/ 3];
+        final waypoint2Pos = pts[(pts.length * 2) ~/ 3];
+
+        _stopMarkers.removeWhere((m) => m.markerId.value.startsWith('stop_waypoint_'));
+
+        _stopMarkers.add(
+          Marker(
+            markerId: const MarkerId('stop_waypoint_1'),
+            position: waypoint1Pos,
+            zIndex: 3,
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            infoWindow: InfoWindow(
+              title: 'Transit Waypoint #1',
+              snippet: 'En route along $rName',
+            ),
+          ),
+        );
+
+        _stopMarkers.add(
+          Marker(
+            markerId: const MarkerId('stop_waypoint_2'),
+            position: waypoint2Pos,
+            zIndex: 3,
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            infoWindow: InfoWindow(
+              title: 'Transit Waypoint #2',
+              snippet: 'En route along $rName',
+            ),
+          ),
+        );
+      }
+
+      // 4. Update ETA dynamically based on real road driving distance and duration
+      _latestEta = EtaInfo(
+        etaSeconds: roadResult.durationMinutes * 60,
+        etaMinutes: roadResult.durationMinutes,
+        distanceMeters: (roadResult.distanceKm * 1000).round(),
+        distanceKm: roadResult.distanceKm.toStringAsFixed(1),
+        calculatedAt: DateTime.now(),
+      );
+    });
+
+    _fitCameraToRoute();
   }
 
   void _fitCameraToRoute() {
@@ -803,16 +836,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         final pickupPos = LatLng(tempPickup.latitude, tempPickup.longitude);
                         final dropOffPos = LatLng(tempDropOff.latitude, tempDropOff.longitude);
 
-                        // 2. Build the route immediately using these exact coordinates
+                        // 2. Update local state
                         setState(() {
                           _currentPickup = tempPickup;
                           _currentDropOff = tempDropOff;
-                          _buildRouteFromPoints(
-                            pickupPos: pickupPos,
-                            destinationPos: dropOffPos,
-                            pickupName: tempPickup.name,
-                            destinationName: tempDropOff.name,
-                          );
 
                           if (_activeChild != null) {
                             _activeChild = ChildModel(
@@ -839,10 +866,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           }
                         });
 
-                        // 3. Immediately animate and fit camera to the new route
+                        // 3. Build real road route with curved geometry
+                        await _buildRouteFromPoints(
+                          pickupPos: pickupPos,
+                          destinationPos: dropOffPos,
+                          pickupName: tempPickup.name,
+                          destinationName: tempDropOff.name,
+                        );
+
+                        // 4. Immediately animate and fit camera to the new route
                         _fitCameraToRoute();
 
-                        // 4. Persist to Cloud Firestore Database!
+                        // 5. Persist to Cloud Firestore Database!
                         if (_activeChild != null && _activeChild!.id.isNotEmpty) {
                           await _childrenService.updateChildLocations(
                             childId: _activeChild!.id,
