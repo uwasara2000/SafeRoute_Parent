@@ -267,31 +267,64 @@ class RouteGeneratorService {
   static LatLng geocodePlace(String placeName, {bool isSchool = false}) {
     final lower = placeName.toLowerCase().trim();
 
-    // 1. Direct school match from allSchoolsInSriLanka
+    // 1. Exact match on school
     if (isSchool) {
       for (final item in allSchoolsInSriLanka) {
-        if (lower.contains(item.name.toLowerCase()) ||
-            item.name.toLowerCase().contains(lower) ||
-            _matchesKeywords(lower, item.name.toLowerCase())) {
+        if (item.name.toLowerCase() == lower) {
           return LatLng(item.latitude, item.longitude);
         }
       }
     }
 
-    // 2. Direct location match from allPickupPlacesInSriLanka
+    // 2. Exact match on pickup place
     for (final item in allPickupPlacesInSriLanka) {
-      if (lower.contains(item.name.toLowerCase()) ||
-          item.name.toLowerCase().contains(lower) ||
-          _matchesKeywords(lower, item.name.toLowerCase())) {
+      if (item.name.toLowerCase() == lower) {
         return LatLng(item.latitude, item.longitude);
       }
     }
 
-    // 3. Fallback check on all schools even if not explicitly marked isSchool
-    for (final item in allSchoolsInSriLanka) {
-      if (lower.contains(item.name.toLowerCase()) ||
-          _matchesKeywords(lower, item.name.toLowerCase())) {
-        return LatLng(item.latitude, item.longitude);
+    // 3. Token-based match ignoring generic stop words
+    const stopWords = {
+      'college', 'school', 'vidyalaya', 'convent', 'international',
+      'town', 'stop', 'road', 'junction', 'street', 'avenue', 'place',
+      'station', 'bus', 'stand', 'central', 'main', 'gate', 'bridge',
+      'colombo', 'the', 'and', 'for', 'near', 'approach', 'city'
+    };
+
+    final tokens = lower
+        .split(RegExp(r'[\s,\(\)\/\-\.]+'))
+        .map((s) => s.trim())
+        .where((s) => s.length >= 3 && !stopWords.contains(s))
+        .toList();
+
+    if (isSchool) {
+      for (final item in allSchoolsInSriLanka) {
+        final targetLower = item.name.toLowerCase();
+        for (final token in tokens) {
+          if (targetLower.contains(token)) {
+            return LatLng(item.latitude, item.longitude);
+          }
+        }
+      }
+    }
+
+    for (final item in allPickupPlacesInSriLanka) {
+      final targetLower = item.name.toLowerCase();
+      for (final token in tokens) {
+        if (targetLower.contains(token)) {
+          return LatLng(item.latitude, item.longitude);
+        }
+      }
+    }
+
+    if (!isSchool) {
+      for (final item in allSchoolsInSriLanka) {
+        final targetLower = item.name.toLowerCase();
+        for (final token in tokens) {
+          if (targetLower.contains(token)) {
+            return LatLng(item.latitude, item.longitude);
+          }
+        }
       }
     }
 
@@ -300,14 +333,6 @@ class RouteGeneratorService {
     final latOffset = ((hash % 100) - 50) * 0.0004;
     final lngOffset = (((hash ~/ 100) % 100) - 50) * 0.0004;
     return LatLng(6.9100 + latOffset, 79.8700 + lngOffset);
-  }
-
-  static bool _matchesKeywords(String text, String target) {
-    final words = text.split(RegExp(r'[\s,\(\)\/\-\.]+')).where((w) => w.length >= 4);
-    for (final word in words) {
-      if (target.contains(word)) return true;
-    }
-    return false;
   }
 
   /// Generate a realistic multi-point auto-route polyline between pickup & destination

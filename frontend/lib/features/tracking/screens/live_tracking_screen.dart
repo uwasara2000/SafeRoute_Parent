@@ -151,30 +151,51 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   /// Automatically generate stops, markers and polyline road route tailored for this child
   void _buildAutoRouteForChild(ChildModel child) {
-    // 1. Geocode Child's Pickup & Drop-off (School)
     final pickupPos = RouteGeneratorService.geocodePlace(child.pickupLocation);
     final schoolPos = RouteGeneratorService.geocodePlace(child.school, isSchool: true);
 
+    _buildRouteFromPoints(
+      pickupPos: pickupPos,
+      destinationPos: schoolPos,
+      pickupName: child.pickupLocation,
+      destinationName: child.school,
+      childName: child.name,
+      routeName: child.route,
+    );
+  }
+
+  /// Build markers, polyline and route stops directly from exact coordinates
+  void _buildRouteFromPoints({
+    required LatLng pickupPos,
+    required LatLng destinationPos,
+    required String pickupName,
+    required String destinationName,
+    String? childName,
+    String? routeName,
+  }) {
     _currentPickup = BusStop(
-      id: 'pickup_${child.id}',
-      name: child.pickupLocation,
+      id: 'pickup_${DateTime.now().millisecondsSinceEpoch}',
+      name: pickupName,
       latitude: pickupPos.latitude,
       longitude: pickupPos.longitude,
       order: 1,
     );
 
     _currentDropOff = BusStop(
-      id: 'dest_${child.id}',
-      name: child.school,
-      latitude: schoolPos.latitude,
-      longitude: schoolPos.longitude,
+      id: 'dest_${DateTime.now().millisecondsSinceEpoch}',
+      name: destinationName,
+      latitude: destinationPos.latitude,
+      longitude: destinationPos.longitude,
       order: 99,
     );
 
     _stopMarkers.clear();
     _polylines.clear();
 
-    // 2. Add 🟢 Green Pickup Marker for THIS child
+    final cName = childName ?? _activeChild?.name ?? 'Child';
+    final rName = routeName ?? _activeChild?.route ?? 'Route';
+
+    // 1. Add 🟢 Green Pickup Marker
     _stopMarkers.add(
       Marker(
         markerId: const MarkerId('stop_pickup'),
@@ -182,38 +203,38 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         zIndex: 5,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
         infoWindow: InfoWindow(
-          title: '🟢 ${child.name}\'s Pickup',
-          snippet: child.pickupLocation,
+          title: '🟢 $cName\'s Pickup',
+          snippet: pickupName,
         ),
       ),
     );
 
-    // 3. Add 🏫 Red School Destination Marker for THIS child
+    // 2. Add 🏫 Red School Destination Marker
     _stopMarkers.add(
       Marker(
         markerId: const MarkerId('stop_destination'),
-        position: schoolPos,
+        position: destinationPos,
         zIndex: 5,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         infoWindow: InfoWindow(
-          title: '🏫 ${child.name}\'s School',
-          snippet: child.school,
+          title: '🏫 $cName\'s School',
+          snippet: destinationName,
         ),
       ),
     );
 
-    // 4. Generate Auto-Route curved street polyline
+    // 3. Generate Auto-Route curved street polyline
     final routePoints = RouteGeneratorService.generateAutoRoute(
       pickup: pickupPos,
-      destination: schoolPos,
+      destination: destinationPos,
     );
 
-    // 5. Add intermediate waypoints for context
+    // 4. Add intermediate waypoints for context
     final intermediateStops = RouteGeneratorService.generateIntermediateStops(
       pickup: pickupPos,
-      destination: schoolPos,
-      pickupName: child.pickupLocation,
-      schoolName: child.school,
+      destination: destinationPos,
+      pickupName: pickupName,
+      schoolName: destinationName,
     );
 
     for (int i = 1; i < intermediateStops.length - 1; i++) {
@@ -226,7 +247,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
           infoWindow: InfoWindow(
             title: stop.name,
-            snippet: 'Waypoint #$i along ${child.route}',
+            snippet: 'Waypoint #$i along $rName',
           ),
         ),
       );
@@ -234,7 +255,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
     _polylines.add(
       Polyline(
-        polylineId: PolylineId('auto_route_${child.id}'),
+        polylineId: PolylineId('auto_route_${DateTime.now().millisecondsSinceEpoch}'),
         points: routePoints,
         color: const Color(0xFF0D6B5D),
         width: 5,
@@ -258,14 +279,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     final west = pLng < dLng ? pLng : dLng;
     final east = pLng > dLng ? pLng : dLng;
 
+    final latPad = (north - south) < 0.02 ? 0.02 : (north - south) * 0.18;
+    final lngPad = (east - west) < 0.02 ? 0.02 : (east - west) * 0.18;
+
     _isProgrammaticCameraMove = true;
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(
         LatLngBounds(
-          southwest: LatLng(south - 0.015, west - 0.015),
-          northeast: LatLng(north + 0.015, east + 0.015),
+          southwest: LatLng(south - latPad, west - lngPad),
+          northeast: LatLng(north + latPad, east + lngPad),
         ),
-        60,
+        50,
       ),
     );
   }
@@ -775,49 +799,59 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       onPressed: () async {
                         Navigator.of(ctx).pop();
 
-                        // 1. Update active child and local state
-                        if (_activeChild != null) {
-                          final updatedChild = ChildModel(
-                            id: _activeChild!.id,
-                            parentId: _activeChild!.parentId,
-                            name: _activeChild!.name,
-                            school: tempDropOff.name,
-                            grade: _activeChild!.grade,
-                            route: _activeChild!.route,
-                            vehicleNumber: _activeChild!.vehicleNumber,
-                            status: _activeChild!.status,
-                            eta: _activeChild!.eta,
-                            lastKnownLocation: 'Pickup: ${tempPickup.name} · Drop: ${tempDropOff.name}',
-                            schoolInfo: '${tempDropOff.name}, Colombo',
-                            pickupLocation: tempPickup.name,
-                            pickupTime: _activeChild!.pickupTime,
-                            dropOffLocation: tempDropOff.name,
-                            dropOffTime: _activeChild!.dropOffTime,
-                            transportOperator: _activeChild!.transportOperator,
-                            authorizedGuardians: _activeChild!.authorizedGuardians,
-                            emergencyContact: _activeChild!.emergencyContact,
-                            initials: _activeChild!.initials,
+                        // 1. Get exact coordinates directly from the selected objects
+                        final pickupPos = LatLng(tempPickup.latitude, tempPickup.longitude);
+                        final dropOffPos = LatLng(tempDropOff.latitude, tempDropOff.longitude);
+
+                        // 2. Build the route immediately using these exact coordinates
+                        setState(() {
+                          _currentPickup = tempPickup;
+                          _currentDropOff = tempDropOff;
+                          _buildRouteFromPoints(
+                            pickupPos: pickupPos,
+                            destinationPos: dropOffPos,
+                            pickupName: tempPickup.name,
+                            destinationName: tempDropOff.name,
                           );
 
-                          setState(() {
-                            _activeChild = updatedChild;
-                            _buildAutoRouteForChild(updatedChild);
-                          });
-
-                          // 2. Persist to Cloud Firestore Database!
-                          if (updatedChild.id.isNotEmpty && updatedChild.id != 'child_amaya' && updatedChild.id != 'child_dineth') {
-                            await _childrenService.updateChildLocations(
-                              childId: updatedChild.id,
+                          if (_activeChild != null) {
+                            _activeChild = ChildModel(
+                              id: _activeChild!.id,
+                              parentId: _activeChild!.parentId,
+                              name: _activeChild!.name,
+                              school: tempDropOff.name,
+                              grade: _activeChild!.grade,
+                              route: _activeChild!.route,
+                              vehicleNumber: _activeChild!.vehicleNumber,
+                              status: _activeChild!.status,
+                              eta: _activeChild!.eta,
+                              lastKnownLocation: 'Pickup: ${tempPickup.name} · Drop: ${tempDropOff.name}',
+                              schoolInfo: '${tempDropOff.name}, Colombo',
                               pickupLocation: tempPickup.name,
+                              pickupTime: _activeChild!.pickupTime,
                               dropOffLocation: tempDropOff.name,
+                              dropOffTime: _activeChild!.dropOffTime,
+                              transportOperator: _activeChild!.transportOperator,
+                              authorizedGuardians: _activeChild!.authorizedGuardians,
+                              emergencyContact: _activeChild!.emergencyContact,
+                              initials: _activeChild!.initials,
                             );
                           }
-                        }
+                        });
 
-                        // 3. Re-fit camera
+                        // 3. Immediately animate and fit camera to the new route
                         _fitCameraToRoute();
 
-                        // 4. Notify backend API
+                        // 4. Persist to Cloud Firestore Database!
+                        if (_activeChild != null && _activeChild!.id.isNotEmpty) {
+                          await _childrenService.updateChildLocations(
+                            childId: _activeChild!.id,
+                            pickupLocation: tempPickup.name,
+                            dropOffLocation: tempDropOff.name,
+                          );
+                        }
+
+                        // 5. Notify backend API
                         await _apiService.updateStops(
                           tripId: _getChildTripId(),
                           pickup: {
@@ -832,7 +866,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           },
                         );
 
-                        // 5. Refresh ETA
+                        // 6. Refresh ETA
                         _refreshETA();
 
                         if (mounted) {
