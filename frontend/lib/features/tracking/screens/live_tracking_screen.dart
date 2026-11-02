@@ -57,33 +57,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   Timer? _statusTicker;
   Timer? _etaTicker;
 
-  // Available Pickup Places for Parents to select
-  final List<BusStop> _availablePickups = const [
-    BusStop(id: 'pickup_nawala', name: 'Nawala Road stop', latitude: 6.8960, longitude: 79.8870, order: 1),
-    BusStop(id: 'pickup_rajagiriya', name: 'Rajagiriya Junction stop', latitude: 6.9110, longitude: 79.8890, order: 1),
-    BusStop(id: 'pickup_wattala', name: 'Wattala Junction (Main Road)', latitude: 6.9890, longitude: 79.8910, order: 1),
-    BusStop(id: 'pickup_kelaniya', name: 'Kelaniya Temple Road', latitude: 6.9530, longitude: 79.9160, order: 1),
-    BusStop(id: 'pickup_peliyagoda', name: 'Peliyagoda Interchange', latitude: 6.9650, longitude: 79.9050, order: 1),
-    BusStop(id: 'pickup_nugegoda', name: 'Nugegoda Flyover', latitude: 6.8720, longitude: 79.8920, order: 1),
-    BusStop(id: 'pickup_borella', name: 'Borella Junction', latitude: 6.9140, longitude: 79.8770, order: 1),
-    BusStop(id: 'pickup_kiribathgoda', name: 'Kiribathgoda Town Stop', latitude: 6.9790, longitude: 79.9280, order: 1),
-    BusStop(id: 'pickup_moratuwa', name: 'Moratuwa Cross Junction', latitude: 6.7740, longitude: 79.8820, order: 1),
-    BusStop(id: 'pickup_dehiwala', name: 'Dehiwala Zoo Road', latitude: 6.8520, longitude: 79.8670, order: 1),
-  ];
+  // All available Pickup Places across Sri Lanka
+  List<BusStop> get _availablePickups => RouteGeneratorService.allPickupPlacesInSriLanka
+      .map((p) => p.toBusStop(order: 1))
+      .toList();
 
-  // Available Drop-off / School Places
-  final List<BusStop> _availableDropOffs = const [
-    BusStop(id: 'dest_royal_college', name: 'Royal College, Colombo 07', latitude: 6.9044, longitude: 79.8622, order: 99),
-    BusStop(id: 'dest_ananda_college', name: 'Ananda College, Colombo 10', latitude: 6.9298, longitude: 79.8705, order: 99),
-    BusStop(id: 'dest_visakha', name: 'Visakha Vidyalaya, Colombo 04', latitude: 6.8920, longitude: 79.8600, order: 99),
-    BusStop(id: 'dest_gateway_main', name: 'Gateway College (Main Gate)', latitude: 6.9080, longitude: 79.8970, order: 99),
-    BusStop(id: 'dest_gateway_junior', name: 'Gateway Junior School Gate', latitude: 6.9095, longitude: 79.8950, order: 99),
-    BusStop(id: 'dest_musaeus', name: 'Musaeus College, Colombo 07', latitude: 6.9120, longitude: 79.8620, order: 99),
-    BusStop(id: 'dest_ds_senanayake', name: 'D.S. Senanayake College', latitude: 6.9040, longitude: 79.8740, order: 99),
-    BusStop(id: 'dest_nalanda', name: 'Nalanda College', latitude: 6.9320, longitude: 79.8730, order: 99),
-    BusStop(id: 'dest_st_joseph', name: 'St. Joseph\'s College, Colombo 10', latitude: 6.9240, longitude: 79.8660, order: 99),
-    BusStop(id: 'dest_st_peter', name: 'St. Peter\'s College, Colombo 04', latitude: 6.8850, longitude: 79.8610, order: 99),
-  ];
+  // All available Schools across Sri Lanka
+  List<BusStop> get _availableDropOffs => RouteGeneratorService.allSchoolsInSriLanka
+      .map((s) => s.toBusStop(order: 99))
+      .toList();
 
   @override
   void initState() {
@@ -400,6 +382,228 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     }
   }
 
+  /// Open searchable modal bottom sheet with ALL places or ALL schools in Sri Lanka
+  Future<PlaceItem?> _openPlaceSearchPicker({
+    required BuildContext context,
+    required String title,
+    required bool isSchoolPicker,
+    required String currentSelectedName,
+  }) async {
+    final List<PlaceItem> items = isSchoolPicker
+        ? RouteGeneratorService.allSchoolsInSriLanka
+        : RouteGeneratorService.allPickupPlacesInSriLanka;
+
+    return showModalBottomSheet<PlaceItem>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (pickerContext) {
+        String searchQuery = '';
+        String selectedCategory = 'All';
+
+        final categories = ['All'] + items.map((e) => e.category).toSet().toList();
+
+        return StatefulBuilder(
+          builder: (ctx, setPickerState) {
+            final filtered = items.where((item) {
+              final matchesQuery = item.name.toLowerCase().contains(searchQuery.toLowerCase());
+              final matchesCategory = selectedCategory == 'All' || item.category == selectedCategory;
+              return matchesQuery && matchesCategory;
+            }).toList();
+
+            return Container(
+              height: MediaQuery.of(ctx).size.height * 0.85,
+              padding: const EdgeInsets.only(top: 16),
+              child: Column(
+                children: [
+                  // Handle bar
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                          onPressed: () => Navigator.of(ctx).pop(),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Search Bar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: isSchoolPicker
+                            ? 'Search any school in Sri Lanka...'
+                            : 'Search any town, city, or pickup point...',
+                        prefixIcon: const Icon(Icons.search, color: Color(0xFF0D6B5D)),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        filled: true,
+                        fillColor: const Color(0xFFF1F5F9),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (val) {
+                        setPickerState(() {
+                          searchQuery = val.trim();
+                        });
+                      },
+                    ),
+                  ),
+
+                  // Category Filter Chips
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    child: Row(
+                      children: categories.map((cat) {
+                        final isSel = selectedCategory == cat;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ChoiceChip(
+                            label: Text(
+                              cat,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                color: isSel ? Colors.white : const Color(0xFF334155),
+                              ),
+                            ),
+                            selected: isSel,
+                            selectedColor: const Color(0xFF0D6B5D),
+                            backgroundColor: const Color(0xFFF1F5F9),
+                            onSelected: (_) {
+                              setPickerState(() {
+                                selectedCategory = cat;
+                              });
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  const Divider(height: 16),
+
+                  // List of Places / Schools
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.location_off_outlined, size: 48, color: Colors.grey),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No matching locations for "$searchQuery"',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      final customCoords = RouteGeneratorService.geocodePlace(searchQuery, isSchool: isSchoolPicker);
+                                      final customItem = PlaceItem(
+                                        id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+                                        name: searchQuery,
+                                        category: 'Custom Location',
+                                        latitude: customCoords.latitude,
+                                        longitude: customCoords.longitude,
+                                      );
+                                      Navigator.of(ctx).pop(customItem);
+                                    },
+                                    icon: const Icon(Icons.add_location_alt, size: 18),
+                                    label: Text('Use "$searchQuery" as Custom Location'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF0D6B5D),
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1, indent: 64),
+                            itemBuilder: (ctx, index) {
+                              final item = filtered[index];
+                              final isSelected = item.name.toLowerCase().contains(currentSelectedName.toLowerCase()) ||
+                                                 currentSelectedName.toLowerCase().contains(item.name.toLowerCase());
+
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: isSchoolPicker
+                                      ? (isSelected ? const Color(0xFF0D6B5D) : const Color(0xFFFEE2E2))
+                                      : (isSelected ? const Color(0xFF0D6B5D) : const Color(0xFFDCFCE7)),
+                                  child: Icon(
+                                    isSchoolPicker ? Icons.school : Icons.location_on,
+                                    size: 20,
+                                    color: isSelected
+                                        ? Colors.white
+                                        : (isSchoolPicker ? Colors.red : Colors.green),
+                                  ),
+                                ),
+                                title: Text(
+                                  item.name,
+                                  style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                    fontSize: 14.5,
+                                    color: const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  item.category,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                ),
+                                trailing: isSelected
+                                    ? const Icon(Icons.check_circle, color: Color(0xFF0D6B5D))
+                                    : null,
+                                onTap: () {
+                                  Navigator.of(ctx).pop(item);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   /// Open bottom sheet to change Pickup & Drop-Off locations and sync with Database
   void _openChangeLocationsSheet() {
     BusStop tempPickup = _currentPickup ?? _availablePickups.first;
@@ -453,7 +657,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // 1. Pickup Place Selection
+                  // 1. Pickup Place Selection Box (Tap to search & select from all Sri Lanka places)
                   const Row(
                     children: [
                       Icon(Icons.location_on, color: Colors.green, size: 20),
@@ -465,43 +669,50 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<BusStop>(
-                        isExpanded: true,
-                        value: _availablePickups.firstWhere(
-                          (p) => p.name.toLowerCase().contains(tempPickup.name.toLowerCase()) ||
-                                 tempPickup.name.toLowerCase().contains(p.name.toLowerCase()),
-                          orElse: () => _availablePickups.first,
-                        ),
-                        items: _availablePickups.map((stop) {
-                          return DropdownMenuItem<BusStop>(
-                            value: stop,
+                  InkWell(
+                    onTap: () async {
+                      final selected = await _openPlaceSearchPicker(
+                        context: modalContext,
+                        title: 'All Pickup Places in Sri Lanka',
+                        isSchoolPicker: false,
+                        currentSelectedName: tempPickup.name,
+                      );
+                      if (selected != null) {
+                        setModalState(() {
+                          tempPickup = selected.toBusStop(order: 1);
+                        });
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              stop.name,
-                              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+                              tempPickup.name,
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                color: Color(0xFF0F172A),
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          );
-                        }).toList(),
-                        onChanged: (newStop) {
-                          if (newStop != null) {
-                            setModalState(() {
-                              tempPickup = newStop;
-                            });
-                          }
-                        },
+                          ),
+                          const Icon(Icons.arrow_drop_down, color: Color(0xFF64748B)),
+                        ],
                       ),
                     ),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // 2. Drop-off Place Selection
+                  // 2. School / Drop-off Place Selection Box (Tap to search & select from all Sri Lanka schools)
                   const Row(
                     children: [
                       Icon(Icons.flag_rounded, color: Colors.red, size: 20),
@@ -513,36 +724,43 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<BusStop>(
-                        isExpanded: true,
-                        value: _availableDropOffs.firstWhere(
-                          (d) => d.name.toLowerCase().contains(tempDropOff.name.toLowerCase()) ||
-                                 tempDropOff.name.toLowerCase().contains(d.name.toLowerCase()),
-                          orElse: () => _availableDropOffs.first,
-                        ),
-                        items: _availableDropOffs.map((stop) {
-                          return DropdownMenuItem<BusStop>(
-                            value: stop,
+                  InkWell(
+                    onTap: () async {
+                      final selected = await _openPlaceSearchPicker(
+                        context: modalContext,
+                        title: 'All Schools in Sri Lanka',
+                        isSchoolPicker: true,
+                        currentSelectedName: tempDropOff.name,
+                      );
+                      if (selected != null) {
+                        setModalState(() {
+                          tempDropOff = selected.toBusStop(order: 99);
+                        });
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              stop.name,
-                              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+                              tempDropOff.name,
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                color: Color(0xFF0F172A),
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          );
-                        }).toList(),
-                        onChanged: (newStop) {
-                          if (newStop != null) {
-                            setModalState(() {
-                              tempDropOff = newStop;
-                            });
-                          }
-                        },
+                          ),
+                          const Icon(Icons.arrow_drop_down, color: Color(0xFF64748B)),
+                        ],
                       ),
                     ),
                   ),
