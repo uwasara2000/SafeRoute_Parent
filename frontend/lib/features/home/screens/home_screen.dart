@@ -905,7 +905,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => JourneyHistoryScreen(
-                  initialChild: _selectedChild?.fullName ?? (_allChildren.isNotEmpty ? _allChildren.first.fullName : null),
+                  initialChild: _selectedChild?.name ?? (_allChildren.isNotEmpty ? _allChildren.first.name : null),
                 ),
               ),
             );
