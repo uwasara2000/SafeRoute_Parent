@@ -6,6 +6,7 @@ import '../../children/models/child_model.dart';
 import '../../children/screens/my_children_screen.dart';
 import '../../children/services/children_service.dart';
 import '../../tracking/screens/live_tracking_screen.dart';
+import '../../history/screens/journey_history_screen.dart';
 
 /// Screen: Parent Home Screen matching the design screenshot
 class HomeScreen extends StatefulWidget {
@@ -532,11 +533,9 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 48,
             child: ElevatedButton(
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Opening live roadmap for $firstName (${child.school} - ${child.route})...'),
-                    duration: const Duration(seconds: 2),
-                    backgroundColor: const Color(0xFF0D6B5D),
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const LiveTrackingScreen(tripId: 'trip_001'),
                   ),
                 );
               },
@@ -603,12 +602,14 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             const SizedBox(width: 10),
-            _buildActionItem(
+                        _buildActionItem(
               icon: Icons.access_time_rounded,
               label: 'Journey\nhistory',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Opening journey history for $name...')),
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => JourneyHistoryScreen(initialChild: name),
+                  ),
                 );
               },
             ),
@@ -890,11 +891,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     final isSelected = _selectedNavIndex == index;
     return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedNavIndex = index;
-        });
-      },
+        onTap: () {
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const LiveTrackingScreen(tripId: 'trip_001'),
+              ),
+            );
+          } else if (index == 2) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => JourneyHistoryScreen(
+                  initialChild: _selectedChild?.fullName ?? (_allChildren.isNotEmpty ? _allChildren.first.fullName : null),
+                ),
+              ),
+            );
+          }
+        },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),

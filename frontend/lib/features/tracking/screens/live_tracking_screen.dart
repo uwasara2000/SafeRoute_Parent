@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/bus_location.dart';
 import '../services/bus_tracking_service.dart';
+import '../../history/screens/journey_history_screen.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   final String tripId;
@@ -297,6 +298,28 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           },
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0D6B5D),
+                          side: const BorderSide(color: Color(0xFF0D6B5D)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        icon: const Icon(Icons.history, size: 18),
+                        label: const Text('View Journey History'),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const JourneyHistoryScreen(),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
