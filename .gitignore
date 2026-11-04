@@ -53,3 +53,10 @@ coverage/
 
 # Widget Preview related
 .widget_preview/
+
+# Web / Vite / React Dashboard
+dist/
+**/dist/
+.vite/
+**/.vite/
+*.tsbuildinfo
