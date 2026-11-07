@@ -5,6 +5,8 @@ import '../../home/screens/driver_dashboard_screen.dart';
 import '../../navigation/screens/driver_trips_screen.dart';
 import '../../roster/screens/driver_students_screen.dart';
 import '../../incidents/screens/driver_notifications_screen.dart';
+import '../../navigation/screens/route_stops_screen.dart';
+import 'personal_information_screen.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   final String driverName;
@@ -23,7 +25,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   String _selectedRole = 'Driver'; // 'Driver' or 'Attendant'
   late String _displayName;
   String _phone = '+94 77 123 4567';
-  final String _email = 'dilan.perera@saferoute.lk';
+  String _email = 'dilan.perera@saferoute.lk';
 
   @override
   void initState() {
@@ -33,92 +35,53 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         : '${widget.driverName} Perera';
   }
 
-  void _showEditProfileDialog() {
-    final nameCtrl = TextEditingController(text: _displayName);
-    final phoneCtrl = TextEditingController(text: _phone);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Edit Profile Information',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF0F172A),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8)),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const Text('Full Name', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-              const SizedBox(height: 6),
-              TextField(
-                controller: nameCtrl,
-                decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text('Phone Number', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-              const SizedBox(height: 6),
-              TextField(
-                controller: phoneCtrl,
-                decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _displayName = nameCtrl.text.trim();
-                      _phone = phoneCtrl.text.trim();
-                    });
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Profile information updated.')),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
+  Future<void> _openPersonalInformation() async {
+    final result = await Navigator.of(context).push<Map<String, String>>(
+      MaterialPageRoute(
+        builder: (_) => PersonalInformationScreen(
+          fullName: _displayName,
+          email: _email,
+          phone: _phone,
+          role: _selectedRole,
         ),
       ),
     );
+
+    if (result != null && mounted) {
+      setState(() {
+        if (result['name'] != null && result['name']!.isNotEmpty) {
+          _displayName = result['name']!;
+        }
+        if (result['email'] != null && result['email']!.isNotEmpty) {
+          _email = result['email']!;
+        }
+        if (result['phone'] != null && result['phone']!.isNotEmpty) {
+          _phone = result['phone']!;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Personal information updated successfully.'),
+          duration: Duration(milliseconds: 1500),
+        ),
+      );
+    }
+  }
+
+  void _openRouteAndStops() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RouteStopsScreen(
+          routeName: 'Route 07 • Lake Road',
+          vehicleNumber: 'NB-4578',
+          driverName: widget.driverName,
+        ),
+      ),
+    );
+  }
+
+  void _showEditProfileDialog() {
+    _openPersonalInformation();
   }
 
   void _showInfoDialog(String title, String content) {
@@ -420,7 +383,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                           _buildPreferenceItem(
                             icon: Icons.directions_bus_outlined,
                             title: 'Assigned vehicle & route',
-                            onTap: () => _showInfoDialog('Assigned Fleet', 'Vehicle: NB-4578 (Ashok Leyland • 32 seats)\nRoute: Route 07 • Lake Road\nDestination: Colombo Central College'),
+                            onTap: _openRouteAndStops,
                           ),
                           _buildDivider(),
                           _buildPreferenceItem(

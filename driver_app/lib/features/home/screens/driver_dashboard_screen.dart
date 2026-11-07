@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../navigation/screens/active_trip_map_screen.dart';
 import '../../navigation/screens/trip_details_screen.dart';
 import '../../navigation/screens/driver_trips_screen.dart';
+import '../../navigation/screens/route_stops_screen.dart';
 import '../../roster/screens/driver_students_screen.dart';
 import '../../incidents/screens/report_delay_screen.dart';
 import '../../incidents/screens/emergency_alert_screen.dart';
@@ -807,7 +808,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   icon: Icons.alt_route_rounded,
                   iconColor: const Color(0xFF2563EB),
                   iconBg: const Color(0xFFEFF6FF),
-                  onTap: _navigateToLiveMap,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => RouteStopsScreen(
+                          driverName: widget.driverName,
+                          routeName: 'Route 07 • Lake Road',
+                          vehicleNumber: 'NB-4578',
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 12),

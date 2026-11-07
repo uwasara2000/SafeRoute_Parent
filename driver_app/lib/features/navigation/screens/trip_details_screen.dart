@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'active_trip_map_screen.dart';
+import 'route_stops_screen.dart';
 
 class TripDetailsScreen extends StatefulWidget {
   final String tripId;
@@ -633,7 +634,17 @@ class _TripDetailsScreenState extends State<TripDetailsScreen> {
               width: double.infinity,
               height: 52,
               child: OutlinedButton.icon(
-                onPressed: _launchNavigation,
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => RouteStopsScreen(
+                        routeName: widget.routeName,
+                        vehicleNumber: widget.vehicleNumber,
+                        driverName: widget.driverName,
+                      ),
+                    ),
+                  );
+                },
                 icon: const Icon(
                   Icons.map_outlined,
                   size: 20,
