@@ -3,6 +3,7 @@ import '../../navigation/screens/active_trip_map_screen.dart';
 import '../../navigation/screens/trip_details_screen.dart';
 import '../../navigation/screens/driver_trips_screen.dart';
 import '../../navigation/screens/route_stops_screen.dart';
+import '../../navigation/screens/gps_status_screen.dart';
 import '../../roster/screens/driver_students_screen.dart';
 import '../../incidents/screens/report_delay_screen.dart';
 import '../../incidents/screens/emergency_alert_screen.dart';
@@ -142,99 +143,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     _pulseController.dispose();
     _entranceController.dispose();
     super.dispose();
-  }
-
-  void _showGpsStatusDialog() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.gps_fixed_rounded, color: Color(0xFF2563EB), size: 24),
-                ),
-                const SizedBox(width: 14),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'GPS Telematics Status',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF0F172A),
-                      ),
-                    ),
-                    Text(
-                      'Real-time vehicle position stream',
-                      style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            _buildGpsRow('GPS Hardware Fix', 'Active • 14 Satellites Locked', const Color(0xFF10B981)),
-            _buildGpsRow('Broadcast Latency', '42 ms (Direct RTDB sync)', const Color(0xFF10B981)),
-            _buildGpsRow('Positional Accuracy', '± 3.8 meters (High Precision)', const Color(0xFF10B981)),
-            _buildGpsRow('Live Stream Channel', 'liveTrips/route_07/location', const Color(0xFF2563EB)),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                child: const Text('Close Status', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGpsRow(String label, String value, Color statusColor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
-          Row(
-            children: [
-              Container(width: 7, height: 7, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
-              const SizedBox(width: 6),
-              Text(
-                value,
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: statusColor),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   void _navigateToLiveMap() {
@@ -828,7 +736,15 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   icon: Icons.gps_fixed_rounded,
                   iconColor: const Color(0xFF2563EB),
                   iconBg: const Color(0xFFEFF6FF),
-                  onTap: _showGpsStatusDialog,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => GpsStatusScreen(
+                          driverName: widget.driverName,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ],

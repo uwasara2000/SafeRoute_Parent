@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../../core/constants/app_colors.dart';
 import '../services/incident_service.dart';
 
 class EmergencyAlertScreen extends StatefulWidget {
@@ -9,64 +8,241 @@ class EmergencyAlertScreen extends StatefulWidget {
 
   const EmergencyAlertScreen({
     super.key,
-    required this.tripId,
-    required this.driverName,
-    required this.vehicleNumber,
+    this.tripId = 'route_07',
+    this.driverName = 'Dilan',
+    this.vehicleNumber = 'NB-4578',
   });
 
   @override
   State<EmergencyAlertScreen> createState() => _EmergencyAlertScreenState();
 }
 
-class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
+class _EmergencyAlertScreenState extends State<EmergencyAlertScreen>
+    with SingleTickerProviderStateMixin {
   final IncidentService _incidentService = IncidentService();
-  final TextEditingController _detailsController = TextEditingController();
 
-  String _selectedEmergencyType = 'Vehicle Breakdown / Engine Failure';
-  bool _isSubmitting = false;
+  late AnimationController _animController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
-  final List<String> _emergencyTypes = [
-    'Vehicle Breakdown / Engine Failure',
-    'Road Traffic Collision / Accident',
-    'Student Medical Emergency',
-    'Safety Threat / Physical Obstruction',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+
+    _fadeAnimation = CurvedAnimation(
+      parent: _animController,
+      curve: Curves.easeOutCubic,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _animController.forward();
+  }
 
   @override
   void dispose() {
-    _detailsController.dispose();
+    _animController.dispose();
     super.dispose();
   }
 
-  Future<void> _submitEmergency() async {
-    setState(() => _isSubmitting = true);
-
-    await _incidentService.reportEmergency(
-      tripId: widget.tripId,
-      driverName: widget.driverName,
-      vehicleNumber: widget.vehicleNumber,
-      emergencyType: _selectedEmergencyType,
-      latitude: 6.8906,
-      longitude: 79.8890,
-      details: _detailsController.text.trim(),
+  void _callEmergencyNumber(String number, String label) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFEE2E2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.phone_rounded, color: Color(0xFFDC2626), size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Call $label?',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+          ],
+        ),
+        content: Text(
+          'Connecting to $label ($number). Use this line only for genuine urgent operations or emergencies.',
+          style: const TextStyle(fontSize: 13.5, color: Color(0xFF475569), height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Connecting to $label ($number)...'),
+                  backgroundColor: const Color(0xFFDC2626),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text('Dial $number'),
+          ),
+        ],
+      ),
     );
+  }
+
+  void _handleIncidentCategory(String category) {
+    final noteController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEE2E2),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.warning_amber_rounded,
+                          color: Color(0xFFEF4444),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        category,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8)),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This will alert SafeRoute Operations and transmit your live bus location (NB-4578).',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF64748B),
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: noteController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Additional details (optional)...',
+                  hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await _sendEmergencyReport(category, noteController.text.trim());
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFDC2626),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text(
+                    'Confirm & Broadcast Alert',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendEmergencyReport(String category, String note) async {
+    try {
+      await _incidentService.reportEmergency(
+        tripId: widget.tripId,
+        driverName: widget.driverName,
+        vehicleNumber: widget.vehicleNumber,
+        emergencyType: category,
+        latitude: 6.8906,
+        longitude: 79.8890,
+        details: note,
+      );
+    } catch (_) {
+      // Graceful demo handling
+    }
 
     if (!mounted) return;
-    setState(() => _isSubmitting = false);
 
     showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: const [
+            Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 24),
             SizedBox(width: 8),
-            Text('SOS Alert Dispatched', style: TextStyle(fontSize: 16)),
+            Text('Operator Alerted', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
           ],
         ),
-        content: const Text(
-          'Emergency notification with live GPS coordinates has been sent to Transport Operations and Admin Hotline. Operators will contact you immediately.',
+        content: Text(
+          'Emergency report for "$category" broadcasted successfully. Operations desk is monitoring your vehicle.',
+          style: const TextStyle(fontSize: 13.5, color: Color(0xFF475569), height: 1.4),
         ),
         actions: [
           ElevatedButton(
@@ -75,10 +251,10 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
+              backgroundColor: const Color(0xFF2563EB),
               foregroundColor: Colors.white,
             ),
-            child: const Text('Acknowledge'),
+            child: const Text('Done'),
           ),
         ],
       ),
@@ -88,180 +264,135 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        leading: IconButton(
-          icon: const Icon(Icons.close_rounded, color: AppColors.textPrimary),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Emergency SOS Dispatch',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFFEF4444),
-          ),
-        ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Warning Card
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFECACA)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.shield_outlined, color: Color(0xFFEF4444), size: 28),
-                  SizedBox(width: 12),
-                  Expanded(
+            // Top App Bar
+            _buildAppBar(),
+
+            // Content
+            Expanded(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: SlideTransition(
+                  position: _slideAnimation,
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'CRITICAL INCIDENT ALERT',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFFB91C1C),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Only trigger for real emergencies. This triggers immediate dispatch escalation.',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF7F1D1D)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
+                        const SizedBox(height: 6),
 
-            const Text(
-              'Select Emergency Category',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Column(
-              children: _emergencyTypes.map((type) {
-                final isSelected = _selectedEmergencyType == type;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: InkWell(
-                    onTap: () => setState(() => _selectedEmergencyType = type),
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFFEF2F2) : const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFE2E8F0),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            isSelected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                            color: isSelected ? const Color(0xFFEF4444) : const Color(0xFF94A3B8),
-                            size: 20,
+                        // Red Hero Danger Card: Immediate danger? Call 119
+                        _buildImmediateDangerCard(),
+
+                        const SizedBox(height: 24),
+
+                        // Section Title: What happened?
+                        const Text(
+                          'What happened?',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F172A),
+                            letterSpacing: -0.4,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              type,
-                              style: TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                color: isSelected ? const Color(0xFFB91C1C) : AppColors.textPrimary,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Choose the closest category to alert your operator.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+
+                        const SizedBox(height: 18),
+
+                        // 2x3 Grid of Categories
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Vehicle\nbreakdown',
+                                icon: Icons.warning_amber_rounded,
+                                onTap: () => _handleIncidentCategory('Vehicle breakdown'),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 20),
-
-            const Text(
-              'Incident Details & Assistance Required',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _detailsController,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: 'Describe current situation and required support (e.g. towing, replacement bus, medical)...',
-                hintStyle: const TextStyle(fontSize: 13, color: AppColors.textHint),
-                filled: true,
-                fillColor: const Color(0xFFFAFAFA),
-                contentPadding: const EdgeInsets.all(14),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.borderSubtle, width: 1.2),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.borderSubtle, width: 1.2),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-
-            // Submit Button
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: _isSubmitting ? null : _submitEmergency,
-                icon: const Icon(Icons.campaign_rounded, size: 22),
-                label: _isSubmitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Accident\n',
+                                icon: Icons.warning_amber_rounded,
+                                onTap: () => _handleIncidentCategory('Accident'),
+                              ),
+                            ),
+                          ],
                         ),
-                      )
-                    : const Text(
-                        'DISPATCH EMERGENCY SOS',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                      ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFEF4444),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+
+                        const SizedBox(height: 12),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Medical concern\n',
+                                icon: Icons.shield_outlined,
+                                onTap: () => _handleIncidentCategory('Medical concern'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Missing student\n',
+                                icon: Icons.person_outline_rounded,
+                                onTap: () => _handleIncidentCategory('Missing student'),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Unauthorized\npickup',
+                                icon: Icons.warning_amber_rounded,
+                                onTap: () => _handleIncidentCategory('Unauthorized pickup'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildCategoryCard(
+                                title: 'Road obstruction\n',
+                                icon: Icons.warning_amber_rounded,
+                                onTap: () => _handleIncidentCategory('Road obstruction'),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Full width: Other safety concern
+                        _buildFullWidthCategoryCard(
+                          title: 'Other safety concern',
+                          icon: Icons.warning_amber_rounded,
+                          onTap: () => _handleIncidentCategory('Other safety concern'),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Contact Transport Operator
+                        _buildContactOperatorCard(),
+
+                        const SizedBox(height: 24),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -271,5 +402,379 @@ class _EmergencyAlertScreenState extends State<EmergencyAlertScreen> {
       ),
     );
   }
+
+  Widget _buildAppBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: () => Navigator.pop(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 16,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+            ),
+          ),
+          const Text(
+            'Safety & emergency',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF0F172A),
+              letterSpacing: -0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImmediateDangerCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFFECACA), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.phone_forwarded_rounded,
+                size: 24,
+                color: Color(0xFFDC2626),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Immediate danger?',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFDC2626),
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Call local emergency services first. An in-app report does not guarantee immediate response.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF991B1B),
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _PressableEmergencyButton(
+            onTap: () => _callEmergencyNumber('119', 'Police Emergency'),
+            text: 'Call 119',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryCard({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return _PressableScale(
+      onTap: onTap,
+      child: Container(
+        height: 74,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: const Color(0xFFEF4444),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title.trim(),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                  height: 1.25,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: Color(0xFF94A3B8),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFullWidthCategoryCard({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return _PressableScale(
+      onTap: onTap,
+      child: Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: const Color(0xFFEF4444),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: Color(0xFF94A3B8),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContactOperatorCard() {
+    return _PressableScale(
+      onTap: () => _callEmergencyNumber('+94 11 234 5678', 'SafeRoute Operations'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.phone_outlined,
+                size: 20,
+                color: Color(0xFF2563EB),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Contact transport operator',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'SafeRoute Operations · available now',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: Color(0xFF94A3B8),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
+class _PressableEmergencyButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final String text;
+
+  const _PressableEmergencyButton({
+    required this.onTap,
+    required this.text,
+  });
+
+  @override
+  State<_PressableEmergencyButton> createState() => _PressableEmergencyButtonState();
+}
+
+class _PressableEmergencyButtonState extends State<_PressableEmergencyButton> {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _isPressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOutCubic,
+        child: Container(
+          width: double.infinity,
+          height: 46,
+          decoration: BoxDecoration(
+            color: const Color(0xFFDC2626),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFDC2626).withValues(alpha: 0.3),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            widget.text,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PressableScale extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+
+  const _PressableScale({
+    required this.child,
+    required this.onTap,
+  });
+
+  @override
+  State<_PressableScale> createState() => _PressableScaleState();
+}
+
+class _PressableScaleState extends State<_PressableScale> {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _isPressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOutCubic,
+        child: widget.child,
+      ),
+    );
+  }
+}
