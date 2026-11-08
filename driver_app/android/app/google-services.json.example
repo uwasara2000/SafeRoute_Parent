@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "633595353219",
+    "firebase_url": "https://track-my-kid-dae5b-default-rtdb.firebaseio.com",
+    "project_id": "track-my-kid-dae5b",
+    "storage_bucket": "track-my-kid-dae5b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:633595353219:android:1af006e9a1d8eca20ea3b6",
+        "android_client_info": {
+          "package_name": "com.example.driver_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "633595353219-2fd9lo3p5bbdqrplma88nt7o5k6qr62o.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "YOUR_FIREBASE_API_KEY_HERE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "633595353219-2fd9lo3p5bbdqrplma88nt7o5k6qr62o.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
