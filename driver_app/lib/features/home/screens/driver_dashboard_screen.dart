@@ -240,6 +240,35 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   // ---------------------------------------------------------------------------
+  // Real-Time Date, Dynamic Greeting & Initials
+  // ---------------------------------------------------------------------------
+  String get _currentFormattedDate {
+    final now = DateTime.now();
+    const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+    const months = [
+      'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+      'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+    ];
+    final dayName = days[now.weekday - 1];
+    final monthName = months[now.month - 1];
+    return '$dayName, ${now.day} $monthName';
+  }
+
+  String get _currentGreeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  String get _avatarInitials {
+    final parts = widget.driverName.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts[0].isEmpty) return 'DR';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // ---------------------------------------------------------------------------
   // 1. Navy Header
   // ---------------------------------------------------------------------------
   Widget _buildNavyHeader() {
@@ -257,9 +286,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'MONDAY, 24 JUNE',
-                style: TextStyle(
+              Text(
+                _currentFormattedDate,
+                style: const TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.9,
@@ -268,7 +297,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
               ),
               const SizedBox(height: 6),
               Text(
-                'Good morning, ${widget.driverName}',
+                '$_currentGreeting, ${widget.driverName}',
                 style: const TextStyle(
                   fontSize: 23,
                   fontWeight: FontWeight.bold,
@@ -316,9 +345,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                     ],
                   ),
                   alignment: Alignment.center,
-                  child: const Text(
-                    'DP',
-                    style: TextStyle(
+                  child: Text(
+                    _avatarInitials,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15.5,
                       fontWeight: FontWeight.bold,

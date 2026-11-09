@@ -21,6 +21,15 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> {
   int _selectedTab = 0; // 0: Today, 1: Upcoming, 2: History
   final int _currentNavIndex = 1;
 
+  String get _todayDateFormatted {
+    final now = DateTime.now();
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return '${now.day} ${months[now.month - 1]}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -141,7 +150,7 @@ class _DriverTripsScreenState extends State<DriverTripsScreen> {
                       children: [
                         Text(
                           _selectedTab == 0
-                              ? 'Today, 24 June'
+                              ? 'Today, $_todayDateFormatted'
                               : _selectedTab == 1
                                   ? 'Upcoming Trips'
                                   : 'Completed History',

@@ -30,9 +30,23 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _displayName = widget.driverName.contains('Perera')
-        ? widget.driverName
-        : '${widget.driverName} Perera';
+    _displayName = widget.driverName.isNotEmpty ? widget.driverName : 'Driver';
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      if (user.email != null && user.email!.isNotEmpty) {
+        _email = user.email!;
+      }
+      if (user.displayName != null && user.displayName!.isNotEmpty && widget.driverName == 'Dilan') {
+        _displayName = user.displayName!;
+      }
+    }
+  }
+
+  String get _avatarInitials {
+    final parts = _displayName.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts[0].isEmpty) return 'DR';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
   Future<void> _openPersonalInformation() async {
@@ -201,9 +215,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                               borderRadius: BorderRadius.circular(16),
                             ),
                             alignment: Alignment.center,
-                            child: const Text(
-                              'DP',
-                              style: TextStyle(
+                            child: Text(
+                              _avatarInitials,
+                              style: const TextStyle(
                                 fontSize: 19,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,

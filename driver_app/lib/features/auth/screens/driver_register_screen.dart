@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../home/screens/driver_dashboard_screen.dart';
 import '../services/driver_auth_service.dart';
 
 class DriverRegisterScreen extends StatefulWidget {
@@ -92,7 +93,23 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen>
     setState(() => _isLoading = false);
 
     if (result.isSuccess) {
-      _showRegistrationSuccessDialog();
+      final name = _fullNameController.text.trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Welcome, $name! Account created successfully.'),
+          backgroundColor: const Color(0xFF2563EB),
+          duration: const Duration(milliseconds: 2000),
+        ),
+      );
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => DriverDashboardScreen(
+            driverName: name.isNotEmpty ? name : 'Driver',
+          ),
+        ),
+        (route) => false,
+      );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -681,3 +698,4 @@ class _PressableScaleState extends State<_PressableScale> {
     );
   }
 }
+
