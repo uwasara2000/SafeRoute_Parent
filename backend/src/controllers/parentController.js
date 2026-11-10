@@ -1,6 +1,36 @@
 const tripService = require('../services/tripService');
 const etaService = require('../services/etaService');
 
+function isValidStop(stop) {
+  if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return false;
+  const { name, latitude, longitude } = stop;
+  return typeof name === 'string'
+    && name.trim().length > 0
+    && typeof latitude === 'number'
+    && Number.isFinite(latitude)
+    && latitude >= -90
+    && latitude <= 90
+    && typeof longitude === 'number'
+    && Number.isFinite(longitude)
+    && longitude >= -180
+    && longitude <= 180;
+}
+
+function hasValidCoordinates(location) {
+  if (!location || typeof location !== 'object' || Array.isArray(location)) {
+    return false;
+  }
+  const { latitude, longitude } = location;
+  return typeof latitude === 'number'
+    && Number.isFinite(latitude)
+    && latitude >= -90
+    && latitude <= 90
+    && typeof longitude === 'number'
+    && Number.isFinite(longitude)
+    && longitude >= -180
+    && longitude <= 180;
+}
+
 class ParentController {
   /**
    * GET /api/parent/trips/:tripId
@@ -41,6 +71,9 @@ class ParentController {
       if (!location) {
         return res.status(404).json({ error: 'No live location available for this trip' });
       }
+      if (!hasValidCoordinates(location)) {
+        return res.status(502).json({ error: 'The live location contains invalid coordinates' });
+      }
 
       res.json({
         tripId,
@@ -69,6 +102,9 @@ class ParentController {
       if (!currentLocation) {
         return res.status(400).json({ error: 'Bus location not available to calculate ETA' });
       }
+      if (!hasValidCoordinates(currentLocation)) {
+        return res.status(502).json({ error: 'The live location contains invalid coordinates' });
+      }
 
       const etaData = await etaService.calculateETA(
         { latitude: currentLocation.latitude, longitude: currentLocation.longitude },
@@ -93,6 +129,9 @@ class ParentController {
     try {
       const { tripId } = req.params;
       const events = await tripService.getEvents(tripId);
+      if (!events) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
       res.json({ tripId, events });
     } catch (error) {
       console.error('getEvents error:', error);
@@ -106,7 +145,18 @@ class ParentController {
   async updateStops(req, res) {
     try {
       const { tripId } = req.params;
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({ error: 'A valid JSON request body is required' });
+      }
       const { pickup, destination } = req.body;
+
+      if ((!pickup && !destination)
+        || (pickup !== undefined && !isValidStop(pickup))
+        || (destination !== undefined && !isValidStop(destination))) {
+        return res.status(400).json({
+          error: 'Provide a pickup or destination with a name and valid coordinates'
+        });
+      }
 
       const updatedTrip = await tripService.updateTripStops(tripId, { pickup, destination });
       if (!updatedTrip) {
@@ -125,4 +175,3 @@ class ParentController {
 }
 
 module.exports = new ParentController();
-

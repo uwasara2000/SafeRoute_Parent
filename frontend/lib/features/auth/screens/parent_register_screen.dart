@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../../home/screens/home_screen.dart';
-import 'login_screen.dart';
 import '../services/auth_service.dart';
 import '../widgets/registration_form.dart';
 
@@ -42,12 +42,13 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
         _showSuccessDialog(response.user?.fullName ?? fullName);
       } else {
         _showErrorSnackBar(
-          response.errorMessage ?? 'Registration failed. Please check your details.',
+          response.errorMessage ??
+              'Registration failed. Please check your details.',
         );
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      _showErrorSnackBar('An unexpected error occurred: ${e.toString()}');
+      _showErrorSnackBar('An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) {
         setState(() {
@@ -62,9 +63,7 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: const [
             Icon(Icons.check_circle, color: AppColors.primaryTeal, size: 28),
@@ -113,12 +112,14 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
             ),
             onPressed: () {
               Navigator.of(ctx).pop();
-              // Navigate to LoginScreen so the parent can log in
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute<void>(
+                  builder: (_) => HomeScreen(parentName: name),
+                ),
+                (_) => false,
               );
             },
-            child: const Text('Go to Login'),
+            child: const Text('Continue to SafeRoute'),
           ),
         ],
       ),
@@ -149,10 +150,7 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back,
-            color: AppColors.textPrimary,
-          ),
+          icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
           onPressed: () {
             // In standalone/initial test mode, show feedback if back stack is empty
             if (Navigator.of(context).canPop()) {
@@ -216,4 +214,3 @@ class _ParentRegisterScreenState extends State<ParentRegisterScreen> {
     );
   }
 }
-

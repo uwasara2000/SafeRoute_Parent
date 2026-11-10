@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../../children/models/child_model.dart';
 import '../../children/screens/my_children_screen.dart';
 import '../../children/services/children_service.dart';
 import '../../tracking/screens/live_tracking_screen.dart';
 import '../../history/screens/journey_history_screen.dart';
+import '../../alerts/screens/alerts_screen.dart';
+import '../../profile/screens/profile_screen.dart';
 
 /// Screen: Parent Home Screen matching the design screenshot
 class HomeScreen extends StatefulWidget {
   final String? parentName;
 
-  const HomeScreen({
-    super.key,
-    this.parentName,
-  });
+  const HomeScreen({super.key, this.parentName});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -24,11 +24,12 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ChildrenService _childrenService = ChildrenService();
   final PageController _cardsPageController = PageController();
+  late Stream<List<ChildModel>> _childrenStream;
 
   int _selectedNavIndex = 0;
   int _activeCardIndex = 0;
-  String _displayName = 'Nadeesha';
-  String _initials = 'NP';
+  String _displayName = 'Parent';
+  String _initials = 'P';
 
   // Selected child for viewing on the dashboard
   ChildModel? _selectedChild;
@@ -37,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _childrenStream = _childrenService.getChildrenStream();
     _loadParentProfile();
   }
 
@@ -54,7 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
-      if (currentUser.displayName != null && currentUser.displayName!.trim().isNotEmpty) {
+      if (currentUser.displayName != null &&
+          currentUser.displayName!.trim().isNotEmpty) {
         _setDisplayName(currentUser.displayName!.trim());
       }
 
@@ -64,14 +67,22 @@ class _HomeScreenState extends State<HomeScreen> {
           .doc(currentUser.uid)
           .get()
           .then((doc) {
-        if (doc.exists && mounted) {
-          final data = doc.data();
-          final fullName = data?['fullName'] as String?;
-          if (fullName != null && fullName.trim().isNotEmpty) {
-            _setDisplayName(fullName.trim());
-          }
-        }
-      }).catchError((_) {});
+            if (doc.exists && mounted) {
+              final data = doc.data();
+              final fullName = data?['fullName'] as String?;
+              if (fullName != null && fullName.trim().isNotEmpty) {
+                _setDisplayName(fullName.trim());
+              }
+            }
+          })
+          .catchError((Object error) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Unable to load your profile details.'),
+              ),
+            );
+          });
     }
   }
 
@@ -95,7 +106,9 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => MyChildrenScreen(
           initialChildren: _allChildren,
           onSelectChild: (child) {
-            final targetIndex = _allChildren.indexWhere((c) => c.id == child.id);
+            final targetIndex = _allChildren.indexWhere(
+              (c) => c.id == child.id,
+            );
             if (targetIndex != -1 && _cardsPageController.hasClients) {
               _cardsPageController.animateToPage(
                 targetIndex,
@@ -113,10 +126,42 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _retryChildrenLoad() {
+    setState(() {
+      _childrenStream = _childrenService.getChildrenStream();
+    });
+  }
+
+  void _navigateToTab(int index) {
+    setState(() => _selectedNavIndex = index);
+    if (index == 0) return;
+
+    final selectedChild =
+        _selectedChild ??
+        (_allChildren.isNotEmpty
+            ? _allChildren[_activeCardIndex
+                  .clamp(0, _allChildren.length - 1)
+                  .toInt()]
+            : null);
+    final Widget destination = switch (index) {
+      1 => LiveTrackingScreen(initialChild: selectedChild),
+      2 => JourneyHistoryScreen(initialChild: selectedChild?.name),
+      3 => AlertsScreen(initialChild: selectedChild),
+      4 => const ProfileScreen(),
+      _ => const HomeScreen(),
+    };
+
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => destination))
+        .whenComplete(() {
+          if (mounted) setState(() => _selectedNavIndex = 0);
+        });
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<ChildModel>>(
-      stream: _childrenService.getChildrenStream(),
+      stream: _childrenStream,
       initialData: const [],
       builder: (context, snapshot) {
         _allChildren = snapshot.data ?? [];
@@ -139,6 +184,24 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (snapshot.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Material(
+                        color: const Color(0xFFFFF1F2),
+                        borderRadius: BorderRadius.circular(12),
+                        child: ListTile(
+                          title: const Text(
+                            'Unable to load your linked children.',
+                            style: TextStyle(color: AppColors.error),
+                          ),
+                          trailing: TextButton(
+                            onPressed: _retryChildrenLoad,
+                            child: const Text('Retry'),
+                          ),
+                        ),
+                      ),
+                    ),
                   // 1. Header (Greeting + User Avatar)
                   _buildHeader(),
                   const SizedBox(height: 18),
@@ -310,7 +373,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: Column(
           children: [
-            const Icon(Icons.directions_bus_outlined, color: Colors.white, size: 36),
+            const Icon(
+              Icons.directions_bus_outlined,
+              color: Colors.white,
+              size: 36,
+            ),
             const SizedBox(height: 12),
             const Text(
               'No Active Journey',
@@ -332,7 +399,9 @@ class _HomeScreenState extends State<HomeScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: const Color(0xFF0D6B5D),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: const Text('Open My Children'),
             ),
@@ -358,6 +427,7 @@ class _HomeScreenState extends State<HomeScreen> {
               setState(() {
                 _activeCardIndex = index;
                 _selectedChild = _allChildren[index];
+                _selectedChild = _allChildren[index];
               });
             },
             itemBuilder: (context, index) {
@@ -381,7 +451,9 @@ class _HomeScreenState extends State<HomeScreen> {
               width: isActive ? 20 : 6,
               height: 6,
               decoration: BoxDecoration(
-                color: isActive ? const Color(0xFF0D6B5D) : const Color(0xFFD1D5DB),
+                color: isActive
+                    ? const Color(0xFF0D6B5D)
+                    : const Color(0xFFD1D5DB),
                 borderRadius: BorderRadius.circular(3),
               ),
             );
@@ -417,7 +489,10 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.18),
                   borderRadius: BorderRadius.circular(20),
@@ -602,7 +677,7 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             const SizedBox(width: 10),
-                        _buildActionItem(
+            _buildActionItem(
               icon: Icons.access_time_rounded,
               label: 'Journey\nhistory',
               onTap: () {
@@ -619,7 +694,9 @@ class _HomeScreenState extends State<HomeScreen> {
               label: 'Contact\noperator',
               onTap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Calling transport operator for $name...')),
+                  SnackBar(
+                    content: Text('Calling transport operator for $name...'),
+                  ),
                 );
               },
             ),
@@ -656,11 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 22,
-                color: const Color(0xFF0D6B5D),
-              ),
+              Icon(icon, size: 22, color: const Color(0xFF0D6B5D)),
               const SizedBox(height: 6),
               Text(
                 label,
@@ -768,7 +841,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         height: 9,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF0D6B5D), width: 2),
+                          border: Border.all(
+                            color: const Color(0xFF0D6B5D),
+                            width: 2,
+                          ),
                           color: Colors.white,
                         ),
                       ),
@@ -782,7 +858,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         height: 9,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF0D6B5D), width: 2),
+                          border: Border.all(
+                            color: const Color(0xFF0D6B5D),
+                            width: 2,
+                          ),
                           color: Colors.white,
                         ),
                       ),
@@ -835,9 +914,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Color(0xFFF0F2F4), width: 1),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFFF0F2F4), width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -891,28 +968,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     final isSelected = _selectedNavIndex == index;
     return InkWell(
-        onTap: () {
-          setState(() {
-            _selectedNavIndex = index;
-          });
-          if (index == 1) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => LiveTrackingScreen(
-                  initialChild: _selectedChild ?? (_allChildren.isNotEmpty ? _allChildren.first : null),
-                ),
-              ),
-            );
-          } else if (index == 2) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => JourneyHistoryScreen(
-                  initialChild: _selectedChild?.name ?? (_allChildren.isNotEmpty ? _allChildren.first.name : null),
-                ),
-              ),
-            );
-          }
-        },
+      onTap: () {
+        _navigateToTab(index);
+      },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -928,7 +986,9 @@ class _HomeScreenState extends State<HomeScreen> {
             Icon(
               isSelected ? activeIcon : icon,
               size: 22,
-              color: isSelected ? const Color(0xFF0D6B5D) : const Color(0xFF6B7280),
+              color: isSelected
+                  ? const Color(0xFF0D6B5D)
+                  : const Color(0xFF6B7280),
             ),
             const SizedBox(height: 3),
             Text(
@@ -936,7 +996,9 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? const Color(0xFF0D6B5D) : const Color(0xFF6B7280),
+                color: isSelected
+                    ? const Color(0xFF0D6B5D)
+                    : const Color(0xFF6B7280),
               ),
             ),
           ],
@@ -945,5 +1007,3 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-
-

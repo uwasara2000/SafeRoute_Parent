@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_colors.dart';
+import '../../../core/validators/form_validators.dart';
 import '../models/child_model.dart';
 import '../services/children_service.dart';
 import 'child_details_screen.dart';
@@ -21,13 +23,28 @@ class MyChildrenScreen extends StatefulWidget {
 
 class _MyChildrenScreenState extends State<MyChildrenScreen> {
   final ChildrenService _childrenService = ChildrenService();
+  late Stream<List<ChildModel>> _childrenStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _childrenStream = _childrenService.getChildrenStream();
+  }
+
+  void _retryChildrenLoad() {
+    setState(() {
+      _childrenStream = _childrenService.getChildrenStream();
+    });
+  }
 
   void _confirmDeleteChild(ChildModel child) {
     showDialog(
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Row(
             children: const [
               Icon(Icons.warning_amber_rounded, color: AppColors.error),
@@ -44,29 +61,51 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
           ),
           content: Text(
             'Are you sure you want to remove ${child.name} from your account? This child will no longer be tracked on your dashboard.',
-            style: const TextStyle(fontSize: 14, color: Color(0xFF4B5563), height: 1.4),
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF4B5563),
+              height: 1.4,
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Color(0xFF6B7280)),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.error,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               onPressed: () async {
                 Navigator.of(ctx).pop();
-                await _childrenService.deleteChild(child.id);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('${child.name} was removed.'),
-                      backgroundColor: const Color(0xFF1F2937),
-                    ),
-                  );
+                try {
+                  await _childrenService.deleteChild(child.id);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('${child.name} was removed.'),
+                        backgroundColor: const Color(0xFF1F2937),
+                      ),
+                    );
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Unable to remove this child. Please try again.',
+                        ),
+                        backgroundColor: AppColors.error,
+                      ),
+                    );
+                  }
                 }
               },
               child: const Text('Remove'),
@@ -80,13 +119,13 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
   void _showAddChildDialog() {
     final formKey = GlobalKey<FormState>();
     final nameCtrl = TextEditingController();
-    final schoolCtrl = TextEditingController(text: 'Royal College');
-    final gradeCtrl = TextEditingController(text: 'Grade 6A');
-    final pickupCtrl = TextEditingController(text: 'Nawala Road stop');
-    final dropOffCtrl = TextEditingController(text: 'Royal College main gate');
-    final phoneCtrl = TextEditingController(text: '+94 77 555 0199');
+    final schoolCtrl = TextEditingController();
+    final gradeCtrl = TextEditingController();
+    final pickupCtrl = TextEditingController();
+    final dropOffCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -94,123 +133,184 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-          ),
-          child: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Link New Child',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF111827),
+        var isSubmitting = false;
+        return StatefulBuilder(
+          builder: (ctx, setModalState) => Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
+            child: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Link New Child',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF111827),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(ctx).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: nameCtrl,
-                    label: 'Child Full Name',
-                    hint: 'e.g. Amaya Silva or Dineth Silva',
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Please enter child name' : null,
-                  ),
-                  const SizedBox(height: 10),
-                  _buildTextField(
-                    controller: schoolCtrl,
-                    label: 'School (e.g. Royal College, Ananda College)',
-                    hint: 'School name',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildTextField(
-                    controller: gradeCtrl,
-                    label: 'Grade / Class',
-                    hint: 'e.g. Grade 6A',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildTextField(
-                    controller: pickupCtrl,
-                    label: 'Pickup Location',
-                    hint: 'e.g. Nawala Road stop',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildTextField(
-                    controller: dropOffCtrl,
-                    label: 'Drop-off Location',
-                    hint: 'e.g. Royal College main gate',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildTextField(
-                    controller: phoneCtrl,
-                    label: 'Emergency Contact',
-                    hint: 'e.g. +94 77 555 0199',
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryTeal,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(ctx).pop(),
                         ),
-                      ),
-                      onPressed: () async {
-                        if (!formKey.currentState!.validate()) return;
-                        Navigator.of(ctx).pop();
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: nameCtrl,
+                      label: 'Child Full Name',
+                      hint: 'Child full name',
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Please enter child name'
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: schoolCtrl,
+                      label: 'School (e.g. Royal College, Ananda College)',
+                      hint: 'School name',
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Please enter the school name'
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: gradeCtrl,
+                      label: 'Grade / Class',
+                      hint: 'e.g. Grade 6A',
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Please enter the child’s grade'
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: pickupCtrl,
+                      label: 'Pickup Location',
+                      hint: 'e.g. Nawala Road stop',
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Please enter a pickup location'
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: dropOffCtrl,
+                      label: 'Drop-off Location',
+                      hint: 'e.g. Royal College main gate',
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Please enter a drop-off location'
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      controller: phoneCtrl,
+                      label: 'Emergency Contact',
+                      hint: 'e.g. +94 77 555 0199',
+                      validator: FormValidators.validatePhoneNumber,
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryTeal,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                if (!formKey.currentState!.validate()) return;
+                                setModalState(() => isSubmitting = true);
+                                final name = nameCtrl.text.trim();
+                                final school = schoolCtrl.text.trim();
+                                final grade = gradeCtrl.text.trim();
+                                final pickup = pickupCtrl.text.trim();
+                                final dropOff = dropOffCtrl.text.trim();
+                                final emergencyContact = phoneCtrl.text.trim();
+                                try {
+                                  await _childrenService.addChild(
+                                    name: name,
+                                    school: school,
+                                    grade: grade,
+                                    vehicleNumber: '',
+                                    pickupLocation: pickup,
+                                    dropOffLocation: dropOff,
+                                    emergencyContact: emergencyContact,
+                                  );
 
-                        await _childrenService.addChild(
-                          name: nameCtrl.text.trim(),
-                          school: schoolCtrl.text.trim(),
-                          grade: gradeCtrl.text.trim(),
-                          route: 'Route 08',
-                          vehicleNumber: 'NB-4821',
-                          pickupLocation: pickupCtrl.text.trim(),
-                          dropOffLocation: dropOffCtrl.text.trim(),
-                          emergencyContact: phoneCtrl.text.trim(),
-                        );
-
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Child linked successfully!'),
-                              backgroundColor: AppColors.success,
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text(
-                        'Link Child',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Details submitted. Tracking will be available after route assignment.',
+                                        ),
+                                        backgroundColor: AppColors.success,
+                                      ),
+                                    );
+                                  }
+                                } catch (_) {
+                                  if (ctx.mounted) {
+                                    setModalState(() => isSubmitting = false);
+                                  }
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Unable to submit child details. Please try again.',
+                                        ),
+                                        backgroundColor: AppColors.error,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Submit Details',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         );
       },
-    );
+    ).whenComplete(() {
+      nameCtrl.dispose();
+      schoolCtrl.dispose();
+      gradeCtrl.dispose();
+      pickupCtrl.dispose();
+      dropOffCtrl.dispose();
+      phoneCtrl.dispose();
+    });
   }
 
   Widget _buildTextField({
@@ -235,7 +335,10 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 10,
+        ),
       ),
     );
   }
@@ -277,10 +380,37 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
       ),
       body: SafeArea(
         child: StreamBuilder<List<ChildModel>>(
-          stream: _childrenService.getChildrenStream(),
+          stream: _childrenStream,
           initialData: widget.initialChildren,
           builder: (context, snapshot) {
             final children = snapshot.data ?? [];
+
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Unable to load your linked children. Check your connection and try again.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _retryChildrenLoad,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                children.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
             if (children.isEmpty) {
               return Center(
@@ -313,7 +443,7 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'You have not linked any children yet. Tap below to link your children or load the demo.',
+                        'You have not linked any children yet. Submit your child’s details below to request route assignment.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13.5,
@@ -329,31 +459,10 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF0D6B5D),
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 12,
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          await _childrenService.seedTwoDemoChildren();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Loaded 2 children!'),
-                                backgroundColor: AppColors.primaryTeal,
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.bolt, size: 18, color: Color(0xFF0D6B5D)),
-                        label: const Text('Add 2 Children (Amaya & Dineth)'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF0D6B5D),
-                          side: const BorderSide(color: Color(0xFF0D6B5D)),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -370,17 +479,22 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
               child: Column(
                 children: [
                   // List of Child Cards (e.g., 2 cards for 2 children)
-                  ...children.map((child) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: _buildChildCard(child),
-                      )),
+                  ...children.map(
+                    (child) => Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _buildChildCard(child),
+                    ),
+                  ),
 
                   const SizedBox(height: 10),
 
                   // "Student privacy protected" Info Box (Exact match to Image 1)
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFD3EBE5).withOpacity(0.45),
                       borderRadius: BorderRadius.circular(14),
@@ -474,7 +588,10 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4.5,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFD3EBE5).withOpacity(0.6),
                       borderRadius: BorderRadius.circular(20),
@@ -506,7 +623,11 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
                   const SizedBox(width: 8),
                   // Delete / Remove child button
                   IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Color(0xFF9CA3AF), size: 22),
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      color: Color(0xFF9CA3AF),
+                      size: 22,
+                    ),
                     tooltip: 'Remove Child',
                     splashRadius: 18,
                     onPressed: () => _confirmDeleteChild(child),
@@ -531,10 +652,7 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
           // School & Grade
           Text(
             '${child.school} · ${child.grade}',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF6B7280),
-            ),
+            style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
           ),
           const SizedBox(height: 16),
 
@@ -551,10 +669,7 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
                   children: [
                     const Text(
                       'Route',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF6B7280),
-                      ),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -574,10 +689,7 @@ class _MyChildrenScreenState extends State<MyChildrenScreen> {
                   children: [
                     const Text(
                       'Vehicle',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF6B7280),
-                      ),
+                      style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
                     ),
                     const SizedBox(height: 2),
                     Text(

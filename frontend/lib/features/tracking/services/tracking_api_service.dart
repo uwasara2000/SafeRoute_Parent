@@ -1,135 +1,175 @@
 import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
 import '../models/trip_details.dart';
+import '../models/trip_event.dart';
+
+class TrackingApiException implements Exception {
+  final String message;
+  final int? statusCode;
+
+  const TrackingApiException(this.message, {this.statusCode});
+
+  @override
+  String toString() => message;
+}
 
 class TrackingApiService {
-  // Supports both adb reverse (127.0.0.1) and local WiFi network (192.168.1.4)
-  static const List<String> _candidateHosts = [
-    'http://127.0.0.1:5000',
-    'http://192.168.1.4:5000',
-    'http://10.0.2.2:5000',
-  ];
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+  );
 
-  String? _workingHost;
+  final http.Client _client;
+  final String _baseUrl;
 
-  Future<String> _getHost() async {
-    if (_workingHost != null) return _workingHost!;
+  TrackingApiService({http.Client? client, String? baseUrl})
+    : _client = client ?? http.Client(),
+      _baseUrl = _normalizeBaseUrl(
+        baseUrl?.trim().isNotEmpty == true
+            ? baseUrl!.trim()
+            : _configuredBaseUrl.isNotEmpty
+            ? _configuredBaseUrl
+            : _defaultBaseUrl(),
+      );
 
-    for (final host in _candidateHosts) {
-      try {
-        final res = await http.get(Uri.parse('$host/health')).timeout(
-              const Duration(milliseconds: 1500),
-            );
-        if (res.statusCode == 200) {
-          _workingHost = host;
-          return host;
-        }
-      } catch (_) {
-        // Continue trying next host
-      }
+  static String _defaultBaseUrl() {
+    if (kIsWeb) return 'http://localhost:5000';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://10.0.2.2:5000';
     }
-
-    _workingHost = _candidateHosts.first;
-    return _workingHost!;
+    return 'http://127.0.0.1:5000';
   }
 
-  /// GET /api/parent/trips/:tripId
-  Future<TripDetails?> fetchTripDetails(String tripId) async {
-    try {
-      final host = await _getHost();
-      final url = Uri.parse('$host/api/parent/trips/$tripId');
-      final res = await http.get(url).timeout(const Duration(seconds: 4));
+  static String _normalizeBaseUrl(String value) {
+    return value.replaceFirst(RegExp(r'/+$'), '');
+  }
 
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body) as Map<String, dynamic>;
-        return TripDetails.fromMap(data);
-      }
-    } catch (e) {
-      debugPrint('fetchTripDetails note: $e');
+  Future<Map<String, String>> _headers() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const TrackingApiException(
+        'Sign in to access trip information.',
+        statusCode: 401,
+      );
     }
 
-    // Default mock fallback so map always has stops and route data
-    return TripDetails(
-      tripId: tripId,
-      routeId: 'route_colombo_01',
-      routeName: 'Route #12 • Colombo North to Gateway College',
-      active: true,
-      driver: const DriverInfo(
-        driverId: 'driver_john',
-        name: 'John Doe',
-        phone: '+94 77 123 4567',
-        licenseNo: 'B1234567',
-      ),
-      vehicle: const VehicleInfo(
-        vehicleId: 'bus_NA_1234',
-        plateNumber: 'WP NA-1234',
-        model: 'Ashok Leyland 32-Seater',
-        capacity: 32,
-      ),
-      destination: const BusStop(
-        id: 'dest_gateway',
-        name: 'Gateway College, Rajagiriya',
-        latitude: 6.9080,
-        longitude: 79.8970,
-        order: 4,
-      ),
-      stops: const [
-        BusStop(id: 'stop_1', name: 'Wattala Junction (Pickup)', latitude: 6.9890, longitude: 79.8910, order: 1),
-        BusStop(id: 'stop_2', name: 'Kelaniya Temple Road', latitude: 6.9530, longitude: 79.9160, order: 2),
-        BusStop(id: 'stop_3', name: 'Borella Junction', latitude: 6.9140, longitude: 79.8770, order: 3),
-        BusStop(id: 'stop_4', name: 'Gateway College (Destination)', latitude: 6.9080, longitude: 79.8970, order: 4),
-      ],
+    final token = await user.getIdToken();
+    if (token == null || token.isEmpty) {
+      throw const TrackingApiException(
+        'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+
+    return {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Future<http.Response> _get(String path) async {
+    return _client
+        .get(Uri.parse('$_baseUrl$path'), headers: await _headers())
+        .timeout(const Duration(seconds: 8));
+  }
+
+  Future<http.Response> _put(String path, Map<String, dynamic> body) async {
+    return _client
+        .put(
+          Uri.parse('$_baseUrl$path'),
+          headers: await _headers(),
+          body: json.encode(body),
+        )
+        .timeout(const Duration(seconds: 8));
+  }
+
+  Map<String, dynamic> _decodeObject(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = switch (response.statusCode) {
+        400 => 'The trip request contains invalid or unavailable data.',
+        401 => 'Your session has expired. Please sign in again.',
+        403 => 'You do not have access to this trip.',
+        404 => 'Trip information is not available.',
+        _ => 'The tracking service is unavailable. Please try again.',
+      };
+      throw TrackingApiException(message, statusCode: response.statusCode);
+    }
+
+    try {
+      final decoded = json.decode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      throw const TrackingApiException(
+        'The tracking service returned invalid data.',
+      );
+    }
+    throw const TrackingApiException(
+      'The tracking service returned invalid data.',
     );
   }
 
-  /// GET /api/parent/trips/:tripId/eta
-  Future<EtaInfo?> fetchETA(String tripId) async {
-    try {
-      final host = await _getHost();
-      final url = Uri.parse('$host/api/parent/trips/$tripId/eta');
-      final res = await http.get(url).timeout(const Duration(seconds: 4));
-
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body) as Map<String, dynamic>;
-        return EtaInfo.fromMap(data);
-      }
-    } catch (e) {
-      debugPrint('fetchETA note: $e');
-    }
-    return null;
+  String _tripPath(String tripId, [String? suffix]) {
+    final encodedTripId = Uri.encodeComponent(tripId);
+    return '/api/parent/trips/$encodedTripId${suffix ?? ''}';
   }
 
-  /// PUT /api/parent/trips/:tripId/stops
-  Future<TripDetails?> updateStops({
+  Future<TripDetails> fetchTripDetails(String tripId) async {
+    final response = await _get(_tripPath(tripId));
+    return TripDetails.fromMap(_decodeObject(response));
+  }
+
+  Future<EtaInfo> fetchETA(String tripId) async {
+    final response = await _get(_tripPath(tripId, '/eta'));
+    return EtaInfo.fromMap(_decodeObject(response));
+  }
+
+  Future<List<TripEvent>> fetchEvents(String tripId) async {
+    final response = await _get(_tripPath(tripId, '/events'));
+    final data = _decodeObject(response);
+    final events = data['events'];
+    if (events is! List) {
+      throw const TrackingApiException(
+        'The tracking service returned invalid event data.',
+      );
+    }
+
+    return events
+        .whereType<Map<String, dynamic>>()
+        .map(TripEvent.fromMap)
+        .toList()
+      ..sort((left, right) {
+        final leftTime = left.timestamp;
+        final rightTime = right.timestamp;
+        if (leftTime == null) return 1;
+        if (rightTime == null) return -1;
+        return rightTime.compareTo(leftTime);
+      });
+  }
+
+  Future<TripDetails> updateStops({
     required String tripId,
     Map<String, dynamic>? pickup,
     Map<String, dynamic>? destination,
   }) async {
-    try {
-      final host = await _getHost();
-      final url = Uri.parse('$host/api/parent/trips/$tripId/stops');
-      final res = await http
-          .put(
-            url,
-            headers: {'Content-Type': 'application/json'},
-            body: json.encode({
-              if (pickup != null) 'pickup': pickup,
-              if (destination != null) 'destination': destination,
-            }),
-          )
-          .timeout(const Duration(seconds: 4));
-
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        if (data['trip'] != null) {
-          return TripDetails.fromMap(data['trip'] as Map<String, dynamic>);
-        }
-      }
-    } catch (e) {
-      debugPrint('updateStops note: $e');
+    final response = await _put(_tripPath(tripId, '/stops'), {
+      if (pickup != null) 'pickup': pickup,
+      if (destination != null) 'destination': destination,
+    });
+    final data = _decodeObject(response);
+    final trip = data['trip'];
+    if (trip is! Map<String, dynamic>) {
+      throw const TrackingApiException(
+        'The tracking service returned invalid trip data.',
+      );
     }
-    return null;
+    return TripDetails.fromMap(trip);
+  }
+
+  void dispose() {
+    _client.close();
   }
 }
-

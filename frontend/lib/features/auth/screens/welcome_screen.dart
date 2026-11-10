@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../widgets/safe_route_logo.dart';
 import 'login_screen.dart';
-import '../../home/screens/home_screen.dart';
 import 'parent_register_screen.dart';
 
 /// Screen 3: Welcome Screen
@@ -69,10 +69,7 @@ class WelcomeScreen extends StatelessWidget {
                   ),
                   child: const Text(
                     'Log In',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -85,13 +82,18 @@ class WelcomeScreen extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ParentRegisterScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => const ParentRegisterScreen(),
+                      ),
                     );
                   },
                   style: OutlinedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: AppColors.primaryTeal,
-                    side: const BorderSide(color: Color(0xFFD1E5E1), width: 1.3),
+                    side: const BorderSide(
+                      color: Color(0xFFD1E5E1),
+                      width: 1.3,
+                    ),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -99,47 +101,11 @@ class WelcomeScreen extends StatelessWidget {
                   ),
                   child: const Text(
                     'Create Account',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: TextButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const HomeScreen(parentName: 'Nadeesha'),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.arrow_forward, color: AppColors.primaryTeal, size: 18),
-                  label: const Text(
-                    'Explore Dashboard (Demo Mode)',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryTeal,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-
-              // Footnote caption
-              const Text(
-                'Interactive prototype — no live account service connected',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
               const SizedBox(height: 20),
             ],
           ),
@@ -148,4 +114,3 @@ class WelcomeScreen extends StatelessWidget {
     );
   }
 }
-

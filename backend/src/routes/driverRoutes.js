@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const driverController = require('../controllers/driverController');
+const { requireDriverTripAccess } = require('../middleware/firebaseAuth');
+
+router.param('tripId', requireDriverTripAccess);
 
 // Driver starts trip (activates live tracking stream)
 router.post('/trips/:tripId/start', (req, res) => driverController.startTrip(req, res));
@@ -12,4 +15,3 @@ router.post('/trips/:tripId/location', (req, res) => driverController.updateLoca
 router.post('/trips/:tripId/end', (req, res) => driverController.endTrip(req, res));
 
 module.exports = router;
-

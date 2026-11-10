@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const parentController = require('../controllers/parentController');
+const { requireParentTripAccess } = require('../middleware/firebaseAuth');
+
+router.param('tripId', requireParentTripAccess);
 
 // Trip overview, driver, and vehicle details
 router.get('/trips/:tripId', (req, res) => parentController.getTripDetails(req, res));
@@ -18,4 +21,3 @@ router.get('/trips/:tripId/events', (req, res) => parentController.getEvents(req
 router.put('/trips/:tripId/stops', (req, res) => parentController.updateStops(req, res));
 
 module.exports = router;
-

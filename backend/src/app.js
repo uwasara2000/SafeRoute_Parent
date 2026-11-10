@@ -2,6 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const parentRoutes = require('./routes/parentRoutes');
 const driverRoutes = require('./routes/driverRoutes');
+const {
+  requireFirebaseAuth,
+  requireDriverRole
+} = require('./middleware/firebaseAuth');
 
 const app = express();
 
@@ -19,8 +23,8 @@ app.get('/health', (req, res) => {
 });
 
 // Mounted Routes
-app.use('/api/parent', parentRoutes);
-app.use('/api/driver', driverRoutes);
+app.use('/api/parent', requireFirebaseAuth, parentRoutes);
+app.use('/api/driver', requireFirebaseAuth, requireDriverRole, driverRoutes);
 
 // 404 Handler
 app.use((req, res) => {
@@ -34,4 +38,3 @@ app.use((err, req, res, next) => {
 });
 
 module.exports = app;
-

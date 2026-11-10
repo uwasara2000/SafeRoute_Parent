@@ -1,6 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../models/child_model.dart';
 
 /// Service to manage children in Cloud Firestore
@@ -22,20 +22,28 @@ class ChildrenService {
         .where('parentId', isEqualTo: uid)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        return ChildModel.fromMap(doc.data(), doc.id);
-      }).toList();
-    });
+          return snapshot.docs.map((doc) {
+            return ChildModel.fromMap(doc.data(), doc.id);
+          }).toList();
+        });
   }
 
   /// Delete a child document from Firestore
   Future<void> deleteChild(String childId) async {
     final uid = currentUserId;
-    if (uid == null) throw Exception('No authenticated parent logged in.');
-    if (childId.isEmpty) return;
+    if (uid == null) throw StateError('No authenticated parent logged in.');
+    if (childId.isEmpty) throw ArgumentError.value(childId, 'childId');
 
-    await _firestore.collection('children').doc(childId).delete();
-    debugPrint('[ChildrenService] Deleted child: $childId for parent: $uid');
+    final childReference = _firestore.collection('children').doc(childId);
+    final child = await childReference.get();
+    if (!child.exists || child.data()?['parentId'] != uid) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        message: 'This child is not linked to the signed-in parent.',
+      );
+    }
+
+    await childReference.delete();
   }
 
   /// Update child's registered pickup & drop-off locations in Cloud Firestore
@@ -44,29 +52,25 @@ class ChildrenService {
     required String pickupLocation,
     required String dropOffLocation,
   }) async {
-    if (childId.isEmpty) return;
-    try {
-      await _firestore.collection('children').doc(childId).update({
-        'pickupLocation': pickupLocation,
-        'dropOffLocation': dropOffLocation,
-        'lastKnownLocation': 'Pickup: $pickupLocation · School: $dropOffLocation',
-      });
-      debugPrint('[ChildrenService] Updated locations for child: $childId in Firestore');
-    } catch (e) {
-      debugPrint('[ChildrenService] Error updating child locations: $e');
-    }
-  }
-
-  /// Convenience method to seed demo two children for testing Sri Lanka dual-school tracking
-  Future<void> seedTwoDemoChildren() async {
     final uid = currentUserId;
-    if (uid == null) return;
+    if (uid == null) throw StateError('No authenticated parent logged in.');
+    if (childId.isEmpty) throw ArgumentError.value(childId, 'childId');
 
-    final child1 = ChildModel.defaultAmaya(uid);
-    final child2 = ChildModel.defaultSecondChild(uid);
-    await _firestore.collection('children').add(child1.toMap());
-    await _firestore.collection('children').add(child2.toMap());
-    debugPrint('[ChildrenService] Seeded 2 demo children for parent: $uid');
+    final childReference = _firestore.collection('children').doc(childId);
+    final child = await childReference.get();
+    if (!child.exists || child.data()?['parentId'] != uid) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        message: 'This child is not linked to the signed-in parent.',
+      );
+    }
+
+    await childReference.update({
+      'pickupLocation': pickupLocation.trim(),
+      'dropOffLocation': dropOffLocation.trim(),
+      'lastKnownLocation':
+          'Pickup: ${pickupLocation.trim()} · School: ${dropOffLocation.trim()}',
+    });
   }
 
   /// Add a new child to Firestore
@@ -74,7 +78,9 @@ class ChildrenService {
     required String name,
     required String school,
     required String grade,
-    required String route,
+    String? route,
+    String? routeId,
+    String? tripId,
     required String vehicleNumber,
     required String pickupLocation,
     required String dropOffLocation,
@@ -86,7 +92,7 @@ class ChildrenService {
     String? eta,
   }) async {
     final uid = currentUserId;
-    if (uid == null) throw Exception('No authenticated parent logged in.');
+    if (uid == null) throw StateError('No authenticated parent logged in.');
 
     final child = ChildModel(
       id: '',
@@ -94,24 +100,25 @@ class ChildrenService {
       name: name.trim(),
       school: school.trim(),
       grade: grade.trim(),
-      route: route.trim().isEmpty ? 'Route 08' : route.trim(),
-      vehicleNumber: vehicleNumber.trim().isEmpty ? 'NB-4821' : vehicleNumber.trim(),
-      status: 'ON BOARD',
-      eta: eta?.trim().isNotEmpty == true ? eta!.trim() : 'ETA 7:48 AM',
-      lastKnownLocation: 'En route to ${school.trim()} · updated now',
-      schoolInfo: '${school.trim()}, Colombo',
-      pickupLocation: pickupLocation.trim().isEmpty ? 'Home stop' : pickupLocation.trim(),
-      pickupTime: pickupTime?.trim().isNotEmpty == true ? pickupTime!.trim() : '7:15 AM',
-      dropOffLocation: dropOffLocation.trim().isEmpty ? '${school.trim()} main gate' : dropOffLocation.trim(),
-      dropOffTime: dropOffTime?.trim().isNotEmpty == true ? dropOffTime!.trim() : '7:55 AM',
-      transportOperator: transportOperator?.trim().isNotEmpty == true ? transportOperator!.trim() : 'City School Transport',
-      authorizedGuardians: authorizedGuardians?.trim().isNotEmpty == true ? authorizedGuardians!.trim() : 'Authorized Parent',
-      emergencyContact: emergencyContact.trim().isEmpty ? '+94 77 555 0199' : emergencyContact.trim(),
+      route: route?.trim() ?? '',
+      routeId: routeId,
+      tripId: tripId,
+      vehicleNumber: vehicleNumber.trim(),
+      status: 'Not yet linked',
+      eta: eta?.trim() ?? '',
+      lastKnownLocation: 'No trip updates yet',
+      schoolInfo: school.trim(),
+      pickupLocation: pickupLocation.trim(),
+      pickupTime: pickupTime?.trim() ?? '',
+      dropOffLocation: dropOffLocation.trim(),
+      dropOffTime: dropOffTime?.trim() ?? '',
+      transportOperator: transportOperator?.trim() ?? '',
+      authorizedGuardians: authorizedGuardians?.trim() ?? '',
+      emergencyContact: emergencyContact.trim(),
       initials: _computeInitials(name.trim()),
     );
 
     await _firestore.collection('children').add(child.toMap());
-    debugPrint('[ChildrenService] Added child: ${child.name} for parent: $uid');
   }
 
   static String _computeInitials(String name) {

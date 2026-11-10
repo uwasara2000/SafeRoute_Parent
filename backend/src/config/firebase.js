@@ -5,7 +5,9 @@ const axios = require('axios');
 require('dotenv').config();
 
 const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://track-my-kid-dae5b-default-rtdb.firebaseio.com';
-const serviceAccountPath = path.join(__dirname, '../../serviceAccountKey.json');
+const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+  ? path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS)
+  : path.join(__dirname, '../../serviceAccountKey.json');
 
 let hasAdminAuth = false;
 
@@ -19,9 +21,9 @@ if (fs.existsSync(serviceAccountPath)) {
       });
     }
     hasAdminAuth = true;
-    console.log('✅ Firebase Admin initialized with serviceAccountKey.json');
-  } catch (e) {
-    console.warn('⚠️ Could not load serviceAccountKey.json, using REST client fallback.');
+  console.log('Firebase Admin initialized');
+  } catch (error) {
+    console.warn('Could not initialize Firebase Admin; protected API routes will be unavailable.');
   }
 }
 

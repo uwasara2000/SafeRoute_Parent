@@ -8,6 +8,8 @@ class ChildModel {
   final String school;
   final String grade;
   final String route;
+  final String? routeId;
+  final String? tripId;
   final String vehicleNumber;
   final String status; // e.g. "ON BOARD", "AT SCHOOL", "HOME", etc.
   final String eta;
@@ -29,15 +31,17 @@ class ChildModel {
     required this.school,
     required this.grade,
     required this.route,
+    this.routeId,
+    this.tripId,
     required this.vehicleNumber,
     required this.status,
-    this.eta = 'ETA 7:48 AM',
-    this.lastKnownLocation = 'Near Horton Place · updated 2 min ago',
+    this.eta = '',
+    this.lastKnownLocation = 'No trip updates yet',
     required this.schoolInfo,
     required this.pickupLocation,
-    this.pickupTime = '7:15 AM',
+    this.pickupTime = '',
     required this.dropOffLocation,
-    this.dropOffTime = '7:55 AM',
+    this.dropOffTime = '',
     required this.transportOperator,
     required this.authorizedGuardians,
     required this.emergencyContact,
@@ -51,19 +55,21 @@ class ChildModel {
       name: map['name'] ?? '',
       school: map['school'] ?? '',
       grade: map['grade'] ?? '',
-      route: map['route'] ?? 'Route 08',
-      vehicleNumber: map['vehicleNumber'] ?? 'NB-4821',
-      status: map['status'] ?? 'ON BOARD',
-      eta: map['eta'] ?? 'ETA 7:48 AM',
-      lastKnownLocation: map['lastKnownLocation'] ?? 'Near Horton Place · updated 2 min ago',
-      schoolInfo: map['schoolInfo'] ?? '${map['school'] ?? ''}, Colombo 07',
-      pickupLocation: map['pickupLocation'] ?? 'Nawala Road stop',
-      pickupTime: map['pickupTime'] ?? '7:15 AM',
-      dropOffLocation: map['dropOffLocation'] ?? '${map['school'] ?? ''} main gate',
-      dropOffTime: map['dropOffTime'] ?? '7:55 AM',
-      transportOperator: map['transportOperator'] ?? 'City School Transport',
-      authorizedGuardians: map['authorizedGuardians'] ?? 'Authorized Guardian',
-      emergencyContact: map['emergencyContact'] ?? '+94 77 555 0199',
+      route: map['route'] ?? '',
+      routeId: map['routeId']?.toString(),
+      tripId: map['tripId']?.toString(),
+      vehicleNumber: map['vehicleNumber'] ?? '',
+      status: map['status'] ?? 'Not yet linked',
+      eta: map['eta'] ?? '',
+      lastKnownLocation: map['lastKnownLocation'] ?? 'No trip updates yet',
+      schoolInfo: map['schoolInfo'] ?? map['school'] ?? '',
+      pickupLocation: map['pickupLocation'] ?? '',
+      pickupTime: map['pickupTime'] ?? '',
+      dropOffLocation: map['dropOffLocation'] ?? '',
+      dropOffTime: map['dropOffTime'] ?? '',
+      transportOperator: map['transportOperator'] ?? '',
+      authorizedGuardians: map['authorizedGuardians'] ?? '',
+      emergencyContact: map['emergencyContact'] ?? '',
       initials: map['initials'] ?? _computeInitials(map['name'] ?? ''),
     );
   }
@@ -74,7 +80,9 @@ class ChildModel {
       'name': name,
       'school': school,
       'grade': grade,
-      'route': route,
+      if (route.trim().isNotEmpty) 'route': route.trim(),
+      if (routeId?.trim().isNotEmpty == true) 'routeId': routeId!.trim(),
+      if (tripId?.trim().isNotEmpty == true) 'tripId': tripId!.trim(),
       'vehicleNumber': vehicleNumber,
       'status': status,
       'eta': eta,
@@ -100,55 +108,5 @@ class ChildModel {
       return name.substring(0, 2).toUpperCase();
     }
     return name.isNotEmpty ? name[0].toUpperCase() : 'AS';
-  }
-
-  /// Amaya Silva (Child 1 in Sri Lanka school flow)
-  static ChildModel defaultAmaya(String parentId) {
-    return ChildModel(
-      id: 'child_amaya',
-      parentId: parentId,
-      name: 'Amaya Silva',
-      school: 'Royal College',
-      grade: 'Grade 6A',
-      route: 'Route 08',
-      vehicleNumber: 'NB-4821',
-      status: 'ON BOARD',
-      eta: 'ETA 7:48 AM',
-      lastKnownLocation: 'Near Horton Place · updated 2 min ago',
-      schoolInfo: 'Royal College, Colombo 07',
-      pickupLocation: 'Nawala Road stop',
-      pickupTime: '7:15 AM',
-      dropOffLocation: 'Royal College main gate',
-      dropOffTime: '7:55 AM',
-      transportOperator: 'City School Transport',
-      authorizedGuardians: 'Nadeesha Perera, Sunil Silva',
-      emergencyContact: '+94 77 555 0199',
-      initials: 'AS',
-    );
-  }
-
-  /// Dineth Silva (Child 2 in a different Sri Lanka school e.g. Ananda College or Visakha)
-  static ChildModel defaultSecondChild(String parentId) {
-    return ChildModel(
-      id: 'child_dineth',
-      parentId: parentId,
-      name: 'Dineth Silva',
-      school: 'Ananda College',
-      grade: 'Grade 4B',
-      route: 'Route 14',
-      vehicleNumber: 'WP-3156',
-      status: 'ON BOARD',
-      eta: 'ETA 7:50 AM',
-      lastKnownLocation: 'Near Maradana Junction · updated 1 min ago',
-      schoolInfo: 'Ananda College, Colombo 10',
-      pickupLocation: 'Rajagiriya Junction stop',
-      pickupTime: '7:10 AM',
-      dropOffLocation: 'Ananda College primary gate',
-      dropOffTime: '7:50 AM',
-      transportOperator: 'Colombo Metro School Buses',
-      authorizedGuardians: 'Nadeesha Perera, Sunil Silva',
-      emergencyContact: '+94 77 555 0199',
-      initials: 'DS',
-    );
   }
 }

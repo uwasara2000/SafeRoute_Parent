@@ -32,6 +32,7 @@ backend/.env
 **/firebase_options.dart
 **/local.properties
 local.properties
+frontend/web/maps_config.js
 
 # Flutter/Dart/Pub related
 **/doc/api/

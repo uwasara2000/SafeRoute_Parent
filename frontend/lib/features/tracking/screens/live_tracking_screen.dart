@@ -1,24 +1,27 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
+import '../../../core/widgets/parent_bottom_navigation.dart';
 import '../../children/models/child_model.dart';
 import '../../children/services/children_service.dart';
+import '../../alerts/screens/alerts_screen.dart';
+import '../../home/screens/home_screen.dart';
+import '../../profile/screens/profile_screen.dart';
 import '../models/bus_location.dart';
 import '../models/trip_details.dart';
 import '../services/bus_tracking_service.dart';
 import '../services/tracking_api_service.dart';
 import '../services/route_generator_service.dart';
+import '../services/trip_id_for_child.dart';
+import '../utils/maps_api_status.dart';
 import '../../history/screens/journey_history_screen.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   final ChildModel? initialChild;
-  final String tripId;
-
-  const LiveTrackingScreen({
-    super.key,
-    this.initialChild,
-    this.tripId = 'trip_001',
-  });
+  const LiveTrackingScreen({super.key, this.initialChild});
 
   @override
   State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
@@ -31,7 +34,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   GoogleMapController? _mapController;
   StreamSubscription<BusLocation?>? _locationSubscription;
-  StreamSubscription<bool>? _tripStatusSubscription;
+  StreamSubscription<bool?>? _tripStatusSubscription;
   StreamSubscription<List<ChildModel>>? _childrenSubscription;
 
   // Registered Children from Database
@@ -41,15 +44,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   BusLocation? _latestLocation;
   TripDetails? _tripDetails;
   EtaInfo? _latestEta;
-  bool _isTripActive = true;
+  bool _isTripActive = false;
   bool _isLoadingTrip = true;
+  bool _isSavingStops = false;
   bool _autoFollowBus = true; // Automatically tracks bus during ride
-  bool _isProgrammaticCameraMove = false; // Prevents camera animations from pausing auto-follow
+  bool _isProgrammaticCameraMove =
+      false; // Prevents camera animations from pausing auto-follow
+  String? _tripError;
+  String? _trackingError;
 
   // Current pickup & drop-off locations
   BusStop? _currentPickup;
   BusStop? _currentDropOff;
-  String _rideStatus = 'ON BOARD';
+  String _rideStatus = 'Waiting for live bus';
 
   Marker? _busMarker;
   final Set<Marker> _stopMarkers = {};
@@ -57,21 +64,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   Timer? _statusTicker;
   Timer? _etaTicker;
 
-  // Real-time route motion simulation along active road polyline
-  List<LatLng> _activeRoadPoints = [];
-  int _activeRoadIndex = 0;
-  Timer? _realtimeMotionTimer;
-  bool _isLiveSimulating = true;
-  double _currentSpeedKmh = 36.0;
-  RoadRouteResult? _currentRoadResult;
-
   // All available Pickup Places across Sri Lanka
-  List<BusStop> get _availablePickups => RouteGeneratorService.allPickupPlacesInSriLanka
+  List<BusStop> get _availablePickups => RouteGeneratorService
+      .allPickupPlacesInSriLanka
       .map((p) => p.toBusStop(order: 1))
       .toList();
 
   // All available Schools across Sri Lanka
-  List<BusStop> get _availableDropOffs => RouteGeneratorService.allSchoolsInSriLanka
+  List<BusStop> get _availableDropOffs => RouteGeneratorService
+      .allSchoolsInSriLanka
       .map((s) => s.toBusStop(order: 99))
       .toList();
 
@@ -82,12 +83,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
     // 1. Listen to registered children in Firestore database
     _subscribeToChildrenDatabase();
-
-    // 2. Fetch trip info & driver data
-    _loadTripDetailsAndStops();
-
-    // 3. Listen to live GPS stream
-    _subscribeToTrip();
 
     // Re-render every 3 seconds to update freshness label
     _statusTicker = Timer.periodic(const Duration(seconds: 3), (_) {
@@ -101,47 +96,69 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   }
 
   void _subscribeToChildrenDatabase() {
-    _childrenSubscription = _childrenService.getChildrenStream().listen((children) {
-      if (!mounted) return;
+    _childrenSubscription = _childrenService.getChildrenStream().listen(
+      (children) {
+        if (!mounted) return;
 
-      ChildModel? childToBuild;
-      setState(() {
-        if (children.isNotEmpty) {
+        ChildModel? childToBuild;
+        setState(() {
           _registeredChildren = children;
-        } else {
-          // Fallback to two demo children so the screen is always fully functional
-          _registeredChildren = [
-            ChildModel.defaultAmaya('demo'),
-            ChildModel.defaultSecondChild('demo'),
-          ];
-        }
+          if (children.isEmpty) {
+            _activeChild = null;
+            _latestLocation = null;
+            _busMarker = null;
+            _tripDetails = null;
+            _isLoadingTrip = false;
+            _latestEta = null;
+            _tripError = null;
+            return;
+          }
 
-        // If no active child was chosen or active child is not in the list, set first
-        if (_activeChild == null) {
-          _activeChild = _registeredChildren.first;
-          childToBuild = _activeChild;
-        } else {
-          // Re-sync with latest data from Firestore if active child was updated
-          final match = _registeredChildren.firstWhere(
-            (c) => c.id == _activeChild!.id || c.name == _activeChild!.name,
-            orElse: () => _activeChild!,
-          );
-          _activeChild = match;
-          childToBuild = _activeChild;
-        }
-      });
+          final selectedChild = _activeChild;
+          childToBuild = selectedChild == null
+              ? children.first
+              : children.firstWhere(
+                  (child) => child.id == selectedChild.id,
+                  orElse: () => children.first,
+                );
+          _activeChild = childToBuild;
+          _isLoadingTrip = true;
+          _latestLocation = null;
+          _busMarker = null;
+          _rideStatus = 'Waiting for live bus';
+        });
 
-      if (childToBuild != null) {
-        _buildAutoRouteForChild(childToBuild!);
-      }
-    });
+        final child = childToBuild;
+        if (child != null) {
+          _buildAutoRouteForChild(child);
+          _loadTripDetailsAndStops();
+          _subscribeToTrip();
+        } else {
+          _locationSubscription?.cancel();
+          _tripStatusSubscription?.cancel();
+        }
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _trackingError = 'Unable to load your linked children.';
+          _isLoadingTrip = false;
+        });
+      },
+    );
   }
 
   /// Switch the active child being tracked on the map
   void _selectChild(ChildModel child) {
     setState(() {
       _activeChild = child;
-      _rideStatus = child.status;
+      _rideStatus = 'Waiting for live bus';
+      _latestLocation = null;
+      _busMarker = null;
+      _tripDetails = null;
+      _isLoadingTrip = true;
+      _tripError = null;
+      _trackingError = null;
     });
 
     _buildAutoRouteForChild(child);
@@ -151,19 +168,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     _subscribeToTrip();
   }
 
-  String _getChildTripId() {
-    if (_activeChild == null) return widget.tripId;
-    final r = _activeChild!.route.toLowerCase();
-    if (r.contains('08')) return 'route_08';
-    if (r.contains('14')) return 'route_14';
-    if (r.contains('12')) return 'trip_001';
-    return widget.tripId;
-  }
-
   /// Automatically generate stops, markers and polyline road route tailored for this child
   Future<void> _buildAutoRouteForChild(ChildModel child) async {
     final pickupPos = RouteGeneratorService.geocodePlace(child.pickupLocation);
-    final schoolPos = RouteGeneratorService.geocodePlace(child.school, isSchool: true);
+    final schoolPos = RouteGeneratorService.geocodePlace(
+      child.school,
+      isSchool: true,
+    );
 
     await _buildRouteFromPoints(
       pickupPos: pickupPos,
@@ -213,7 +224,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           markerId: const MarkerId('stop_pickup'),
           position: pickupPos,
           zIndex: 5,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueGreen,
+          ),
           infoWindow: InfoWindow(
             title: '🟢 $cName\'s Pickup',
             snippet: pickupName,
@@ -249,7 +262,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       _polylines.clear();
       _polylines.add(
         Polyline(
-          polylineId: PolylineId('real_road_${DateTime.now().millisecondsSinceEpoch}'),
+          polylineId: PolylineId(
+            'real_road_${DateTime.now().millisecondsSinceEpoch}',
+          ),
           points: roadResult.points,
           color: const Color(0xFF0D6B5D),
           width: 6,
@@ -265,14 +280,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         final waypoint1Pos = pts[pts.length ~/ 3];
         final waypoint2Pos = pts[(pts.length * 2) ~/ 3];
 
-        _stopMarkers.removeWhere((m) => m.markerId.value.startsWith('stop_waypoint_'));
+        _stopMarkers.removeWhere(
+          (m) => m.markerId.value.startsWith('stop_waypoint_'),
+        );
 
         _stopMarkers.add(
           Marker(
             markerId: const MarkerId('stop_waypoint_1'),
             position: waypoint1Pos,
             zIndex: 3,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
             infoWindow: InfoWindow(
               title: 'Transit Waypoint #1',
               snippet: 'En route along $rName',
@@ -285,7 +304,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             markerId: const MarkerId('stop_waypoint_2'),
             position: waypoint2Pos,
             zIndex: 3,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
             infoWindow: InfoWindow(
               title: 'Transit Waypoint #2',
               snippet: 'En route along $rName',
@@ -293,166 +314,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           ),
         );
       }
-
-      // 4. Update ETA dynamically based on real road driving distance and duration
-      _latestEta = EtaInfo(
-        etaSeconds: roadResult.durationMinutes * 60,
-        etaMinutes: roadResult.durationMinutes,
-        distanceMeters: (roadResult.distanceKm * 1000).round(),
-        distanceKm: roadResult.distanceKm.toStringAsFixed(1),
-        calculatedAt: DateTime.now(),
-      );
     });
 
     _fitCameraToRoute();
-
-    // 5. Start real-time movement of the child along this active road route
-    _startRealtimeRouteMovement(roadResult);
-  }
-
-  /// Animate and progress the child along the real road polyline in real-time
-  void _startRealtimeRouteMovement(RoadRouteResult roadResult) {
-    _realtimeMotionTimer?.cancel();
-    _currentRoadResult = roadResult;
-    _activeRoadPoints = List<LatLng>.from(roadResult.points);
-    _activeRoadIndex = 0;
-
-    if (_activeRoadPoints.isEmpty) return;
-
-    final initialPos = _activeRoadPoints.first;
-    final initialNext = _activeRoadPoints.length > 1 ? _activeRoadPoints[1] : initialPos;
-    final initialBearing = RouteGeneratorService.calculateBearing(initialPos, initialNext);
-
-    _applySimulatedProgress(
-      position: initialPos,
-      heading: initialBearing,
-      speedKmh: 35.0,
-      index: 0,
-    );
-
-    // Compute step size: 100-140 steps across route, minimum 1 point per tick
-    final totalPts = _activeRoadPoints.length;
-    final stepSize = (totalPts / 120).ceil().clamp(1, 6);
-
-    _realtimeMotionTimer = Timer.periodic(const Duration(milliseconds: 1400), (timer) {
-      if (!mounted || !_isLiveSimulating || _activeRoadPoints.isEmpty) return;
-
-      if (_activeRoadIndex + stepSize < _activeRoadPoints.length) {
-        _activeRoadIndex += stepSize;
-      } else {
-        // Reached destination!
-        _activeRoadIndex = _activeRoadPoints.length - 1;
-        timer.cancel();
-
-        _applySimulatedProgress(
-          position: _activeRoadPoints.last,
-          heading: 0,
-          speedKmh: 0,
-          index: _activeRoadIndex,
-        );
-
-        // Pause for 6 seconds at the destination, then restart journey from pickup
-        Future.delayed(const Duration(seconds: 6), () {
-          if (mounted && _isLiveSimulating && _currentRoadResult != null) {
-            _startRealtimeRouteMovement(_currentRoadResult!);
-          }
-        });
-        return;
-      }
-
-      final currPos = _activeRoadPoints[_activeRoadIndex];
-      final nextIdx = (_activeRoadIndex + 1 < _activeRoadPoints.length) ? _activeRoadIndex + 1 : _activeRoadIndex;
-      final nextPos = _activeRoadPoints[nextIdx];
-      final heading = RouteGeneratorService.calculateBearing(currPos, nextPos);
-
-      // Fluctuate speed realistically between 32 and 46 km/h
-      _currentSpeedKmh = 32.0 + (_activeRoadIndex % 15);
-
-      _applySimulatedProgress(
-        position: currPos,
-        heading: heading,
-        speedKmh: _currentSpeedKmh,
-        index: _activeRoadIndex,
-      );
-    });
-  }
-
-  void _applySimulatedProgress({
-    required LatLng position,
-    required double heading,
-    required double speedKmh,
-    required int index,
-  }) {
-    if (!mounted) return;
-
-    final childName = _activeChild?.name ?? 'Child';
-    final vehicleNo = _activeChild?.vehicleNumber ?? (_tripDetails?.vehicle.plateNumber ?? 'School Bus');
-    final totalPts = _activeRoadPoints.length;
-    final remainingRatio = totalPts > 1 ? (1.0 - (index / totalPts)).clamp(0.0, 1.0) : 0.0;
-    final totalDistKm = _currentRoadResult?.distanceKm ?? 12.0;
-    final totalDurationMins = _currentRoadResult?.durationMinutes ?? 25;
-
-    final remainingDistKm = (totalDistKm * remainingRatio).toStringAsFixed(1);
-    final remainingMinutes = (totalDurationMins * remainingRatio).ceil();
-
-    final isAtDestination = index >= totalPts - 1;
-    final statusText = isAtDestination ? 'ARRIVED AT SCHOOL' : 'ON BOARD';
-
-    setState(() {
-      _rideStatus = statusText;
-
-      // Update ETA info dynamically as child moves
-      _latestEta = EtaInfo(
-        etaSeconds: remainingMinutes * 60,
-        etaMinutes: remainingMinutes,
-        distanceMeters: ((totalDistKm * remainingRatio) * 1000).round(),
-        distanceKm: remainingDistKm,
-        calculatedAt: DateTime.now(),
-      );
-
-      // Update live Bus Marker
-      _busMarker = Marker(
-        markerId: const MarkerId('school_bus'),
-        position: position,
-        rotation: heading,
-        flat: true,
-        anchor: const Offset(0.5, 0.5),
-        zIndex: 10,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        infoWindow: InfoWindow(
-          title: '🚌 $childName\'s Bus ($vehicleNo)',
-          snippet: isAtDestination
-              ? 'Safely arrived at ${_currentDropOff?.name ?? "School"}'
-              : '${speedKmh.toStringAsFixed(0)} km/h • $remainingMinutes min ($remainingDistKm km left)',
-        ),
-      );
-    });
-
-    // Auto-follow camera keeps child centered
-    if (_autoFollowBus && _mapController != null) {
-      _isProgrammaticCameraMove = true;
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLng(position),
-      );
-    }
-
-    // Sync live location to Firebase Realtime Database
-    final tripId = _getChildTripId();
-    _trackingService.updateLocation(
-      tripId,
-      BusLocation(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        heading: heading,
-        speedMps: speedKmh / 3.6,
-        accuracyM: 4.0,
-        updatedAt: DateTime.now(),
-      ),
-    );
   }
 
   void _fitCameraToRoute() {
-    if (_mapController == null || _currentPickup == null || _currentDropOff == null) return;
+    if (_mapController == null ||
+        _currentPickup == null ||
+        _currentDropOff == null)
+      return;
 
     final pLat = _currentPickup!.latitude;
     final pLng = _currentPickup!.longitude;
@@ -480,28 +351,74 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   }
 
   Future<void> _loadTripDetailsAndStops() async {
-    final tripId = _getChildTripId();
-    final details = await _apiService.fetchTripDetails(tripId);
-    if (!mounted) return;
+    final child = _activeChild;
+    if (child == null) {
+      if (mounted) setState(() => _isLoadingTrip = false);
+      return;
+    }
 
-    setState(() {
-      _tripDetails = details;
-      _isLoadingTrip = false;
-      if (details != null) {
-        _isTripActive = details.active;
+    final tripId = tripIdForChild(child);
+    if (tripId == null) {
+      if (mounted) {
+        setState(() {
+          _isLoadingTrip = false;
+          _tripError = 'Live tracking is not configured for this route.';
+        });
       }
-    });
+      return;
+    }
+    try {
+      final details = await _apiService.fetchTripDetails(tripId);
+      if (!mounted) return;
 
-    _refreshETA();
+      setState(() {
+        _tripDetails = details;
+        _isTripActive = details.active;
+        _isLoadingTrip = false;
+        _tripError = null;
+      });
+      await _refreshETA();
+    } on TrackingApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _tripDetails = null;
+        _isLoadingTrip = false;
+        _tripError = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _tripDetails = null;
+        _isLoadingTrip = false;
+        _tripError =
+            'Unable to load trip details. Check your connection and try again.';
+      });
+    }
   }
 
   Future<void> _refreshETA() async {
-    if (!_isTripActive) return;
-    final tripId = _getChildTripId();
-    final eta = await _apiService.fetchETA(tripId);
-    if (mounted && eta != null) {
+    if (!_isTripActive || _activeChild == null || _latestLocation == null)
+      return;
+    final tripId = tripIdForChild(_activeChild);
+    if (tripId == null) return;
+    try {
+      final eta = await _apiService.fetchETA(tripId);
+      if (!mounted) return;
       setState(() {
         _latestEta = eta;
+        _trackingError = null;
+      });
+    } on TrackingApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _latestEta = null;
+        _trackingError = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _latestEta = null;
+        _trackingError = 'Unable to refresh the live ETA.';
       });
     }
   }
@@ -509,38 +426,70 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   void _subscribeToTrip() {
     _locationSubscription?.cancel();
     _tripStatusSubscription?.cancel();
+    _locationSubscription = null;
+    _tripStatusSubscription = null;
 
-    final tripId = _getChildTripId();
+    if (_activeChild == null) return;
+    final tripId = tripIdForChild(_activeChild);
+    if (tripId == null) {
+      setState(
+        () =>
+            _trackingError = 'Live tracking is not configured for this route.',
+      );
+      return;
+    }
 
     // 1. Stream real-time coordinates from Firebase Realtime Database
     _locationSubscription = _trackingService
         .watchLocation(tripId)
-        .listen((location) {
-      if (location != null) {
-        _applyLocationUpdate(location);
-      }
-    });
+        .listen(
+          (location) {
+            if (location != null) {
+              _applyLocationUpdate(location);
+            }
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(
+              () => _trackingError = 'Unable to receive live bus locations.',
+            );
+          },
+        );
 
     // 2. Stream trip status
     _tripStatusSubscription = _trackingService
         .watchTripStatus(tripId)
-        .listen((isActive) {
-      if (mounted) {
-        setState(() {
-          _isTripActive = isActive;
-        });
-      }
-    });
+        .listen(
+          (isActive) {
+            if (mounted && isActive != null) {
+              setState(() {
+                _isTripActive = isActive;
+                if (!isActive && _latestLocation != null) {
+                  _rideStatus = 'Trip ended';
+                }
+              });
+            }
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(
+              () => _trackingError = 'Unable to receive trip status updates.',
+            );
+          },
+        );
   }
 
   void _applyLocationUpdate(BusLocation location) {
     if (!mounted) return;
-    if (_isLiveSimulating && _activeRoadPoints.isNotEmpty) return;
 
     final busLatLng = LatLng(location.latitude, location.longitude);
+    final childName = _activeChild?.name.trim();
+    final plateNumber = _tripDetails?.vehicle?.plateNumber.trim();
 
     setState(() {
       _latestLocation = location;
+      _rideStatus = _isTripActive ? 'Live' : 'Trip ended';
+      _trackingError = null;
       _busMarker = Marker(
         markerId: const MarkerId('school_bus'),
         position: busLatLng,
@@ -550,10 +499,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         zIndex: 10,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
         infoWindow: InfoWindow(
-          title: _activeChild != null
-              ? '${_activeChild!.name}\'s Bus (${_activeChild!.vehicleNumber})'
-              : (_tripDetails?.vehicle.plateNumber ?? 'School Bus'),
-          snippet: 'Speed: ${((location.speedMps ?? 0) * 3.6).toStringAsFixed(0)} km/h • ${_activeChild?.route ?? ""}',
+          title: childName?.isNotEmpty == true
+              ? '$childName\'s school bus'
+              : plateNumber?.isNotEmpty == true
+              ? plateNumber!
+              : 'School Bus',
+          snippet:
+              'Speed: ${((location.speedMps ?? 0) * 3.6).toStringAsFixed(0)} km/h • ${_activeChild?.route ?? ""}',
         ),
       );
     });
@@ -561,9 +513,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     // Auto-update camera location during the ride
     if (_autoFollowBus && _mapController != null) {
       _isProgrammaticCameraMove = true;
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLng(busLatLng),
-      );
+      _mapController!.animateCamera(CameraUpdate.newLatLng(busLatLng));
     }
   }
 
@@ -614,13 +564,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         String searchQuery = '';
         String selectedCategory = 'All';
 
-        final categories = ['All'] + items.map((e) => e.category).toSet().toList();
+        final categories =
+            ['All'] + items.map((e) => e.category).toSet().toList();
 
         return StatefulBuilder(
           builder: (ctx, setPickerState) {
             final filtered = items.where((item) {
-              final matchesQuery = item.name.toLowerCase().contains(searchQuery.toLowerCase());
-              final matchesCategory = selectedCategory == 'All' || item.category == selectedCategory;
+              final matchesQuery = item.name.toLowerCase().contains(
+                searchQuery.toLowerCase(),
+              );
+              final matchesCategory =
+                  selectedCategory == 'All' ||
+                  item.category == selectedCategory;
               return matchesQuery && matchesCategory;
             }).toList();
 
@@ -666,14 +621,23 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
                   // Search Bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 8,
+                    ),
                     child: TextField(
                       decoration: InputDecoration(
                         hintText: isSchoolPicker
                             ? 'Search any school in Sri Lanka...'
                             : 'Search any town, city, or pickup point...',
-                        prefixIcon: const Icon(Icons.search, color: Color(0xFF0D6B5D)),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                        prefixIcon: const Icon(
+                          Icons.search,
+                          color: Color(0xFF0D6B5D),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                          horizontal: 16,
+                        ),
                         filled: true,
                         fillColor: const Color(0xFFF1F5F9),
                         border: OutlineInputBorder(
@@ -692,7 +656,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   // Category Filter Chips
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 4,
+                    ),
                     child: Row(
                       children: categories.map((cat) {
                         final isSel = selectedCategory == cat;
@@ -703,8 +670,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               cat,
                               style: TextStyle(
                                 fontSize: 12,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                color: isSel ? Colors.white : const Color(0xFF334155),
+                                fontWeight: isSel
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isSel
+                                    ? Colors.white
+                                    : const Color(0xFF334155),
                               ),
                             ),
                             selected: isSel,
@@ -732,16 +703,27 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.location_off_outlined, size: 48, color: Colors.grey),
+                                  const Icon(
+                                    Icons.location_off_outlined,
+                                    size: 48,
+                                    color: Colors.grey,
+                                  ),
                                   const SizedBox(height: 12),
                                   Text(
                                     'No matching locations for "$searchQuery"',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                    ),
                                   ),
                                   const SizedBox(height: 12),
                                   ElevatedButton.icon(
                                     onPressed: () {
-                                      final customCoords = RouteGeneratorService.geocodePlace(searchQuery, isSchool: isSchoolPicker);
+                                      final customCoords =
+                                          RouteGeneratorService.geocodePlace(
+                                            searchQuery,
+                                            isSchool: isSchoolPicker,
+                                          );
                                       final customItem = PlaceItem(
                                         id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
                                         name: searchQuery,
@@ -751,8 +733,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                                       );
                                       Navigator.of(ctx).pop(customItem);
                                     },
-                                    icon: const Icon(Icons.add_location_alt, size: 18),
-                                    label: Text('Use "$searchQuery" as Custom Location'),
+                                    icon: const Icon(
+                                      Icons.add_location_alt,
+                                      size: 18,
+                                    ),
+                                    label: Text(
+                                      'Use "$searchQuery" as Custom Location',
+                                    ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF0D6B5D),
                                       foregroundColor: Colors.white,
@@ -764,39 +751,61 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           )
                         : ListView.separated(
                             itemCount: filtered.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1, indent: 64),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1, indent: 64),
                             itemBuilder: (ctx, index) {
                               final item = filtered[index];
-                              final isSelected = item.name.toLowerCase().contains(currentSelectedName.toLowerCase()) ||
-                                                 currentSelectedName.toLowerCase().contains(item.name.toLowerCase());
+                              final isSelected =
+                                  item.name.toLowerCase().contains(
+                                    currentSelectedName.toLowerCase(),
+                                  ) ||
+                                  currentSelectedName.toLowerCase().contains(
+                                    item.name.toLowerCase(),
+                                  );
 
                               return ListTile(
                                 leading: CircleAvatar(
                                   backgroundColor: isSchoolPicker
-                                      ? (isSelected ? const Color(0xFF0D6B5D) : const Color(0xFFFEE2E2))
-                                      : (isSelected ? const Color(0xFF0D6B5D) : const Color(0xFFDCFCE7)),
+                                      ? (isSelected
+                                            ? const Color(0xFF0D6B5D)
+                                            : const Color(0xFFFEE2E2))
+                                      : (isSelected
+                                            ? const Color(0xFF0D6B5D)
+                                            : const Color(0xFFDCFCE7)),
                                   child: Icon(
-                                    isSchoolPicker ? Icons.school : Icons.location_on,
+                                    isSchoolPicker
+                                        ? Icons.school
+                                        : Icons.location_on,
                                     size: 20,
                                     color: isSelected
                                         ? Colors.white
-                                        : (isSchoolPicker ? Colors.red : Colors.green),
+                                        : (isSchoolPicker
+                                              ? Colors.red
+                                              : Colors.green),
                                   ),
                                 ),
                                 title: Text(
                                   item.name,
                                   style: TextStyle(
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                    fontWeight: isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.w600,
                                     fontSize: 14.5,
                                     color: const Color(0xFF0F172A),
                                   ),
                                 ),
                                 subtitle: Text(
                                   item.category,
-                                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF64748B),
+                                  ),
                                 ),
                                 trailing: isSelected
-                                    ? const Icon(Icons.check_circle, color: Color(0xFF0D6B5D))
+                                    ? const Icon(
+                                        Icons.check_circle,
+                                        color: Color(0xFF0D6B5D),
+                                      )
                                     : null,
                                 onTap: () {
                                   Navigator.of(ctx).pop(item);
@@ -874,7 +883,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       SizedBox(width: 8),
                       Text(
                         'Child Pickup Place',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -895,7 +907,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     },
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF8FAFC),
                         border: Border.all(color: const Color(0xFFE2E8F0)),
@@ -914,7 +929,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const Icon(Icons.arrow_drop_down, color: Color(0xFF64748B)),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            color: Color(0xFF64748B),
+                          ),
                         ],
                       ),
                     ),
@@ -929,7 +947,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       SizedBox(width: 8),
                       Text(
                         'School / Drop-off Place',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -950,7 +971,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     },
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF8FAFC),
                         border: Border.all(color: const Color(0xFFE2E8F0)),
@@ -969,7 +993,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const Icon(Icons.arrow_drop_down, color: Color(0xFF64748B)),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            color: Color(0xFF64748B),
+                          ),
                         ],
                       ),
                     ),
@@ -982,91 +1009,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () async {
-                        Navigator.of(ctx).pop();
-
-                        // 1. Get exact coordinates directly from the selected objects
-                        final pickupPos = LatLng(tempPickup.latitude, tempPickup.longitude);
-                        final dropOffPos = LatLng(tempDropOff.latitude, tempDropOff.longitude);
-
-                        // 2. Update local state
-                        setState(() {
-                          _currentPickup = tempPickup;
-                          _currentDropOff = tempDropOff;
-
-                          if (_activeChild != null) {
-                            _activeChild = ChildModel(
-                              id: _activeChild!.id,
-                              parentId: _activeChild!.parentId,
-                              name: _activeChild!.name,
-                              school: tempDropOff.name,
-                              grade: _activeChild!.grade,
-                              route: _activeChild!.route,
-                              vehicleNumber: _activeChild!.vehicleNumber,
-                              status: _activeChild!.status,
-                              eta: _activeChild!.eta,
-                              lastKnownLocation: 'Pickup: ${tempPickup.name} · Drop: ${tempDropOff.name}',
-                              schoolInfo: '${tempDropOff.name}, Colombo',
-                              pickupLocation: tempPickup.name,
-                              pickupTime: _activeChild!.pickupTime,
-                              dropOffLocation: tempDropOff.name,
-                              dropOffTime: _activeChild!.dropOffTime,
-                              transportOperator: _activeChild!.transportOperator,
-                              authorizedGuardians: _activeChild!.authorizedGuardians,
-                              emergencyContact: _activeChild!.emergencyContact,
-                              initials: _activeChild!.initials,
-                            );
-                          }
-                        });
-
-                        // 3. Build real road route with curved geometry
-                        await _buildRouteFromPoints(
-                          pickupPos: pickupPos,
-                          destinationPos: dropOffPos,
-                          pickupName: tempPickup.name,
-                          destinationName: tempDropOff.name,
-                        );
-
-                        // 4. Immediately animate and fit camera to the new route
-                        _fitCameraToRoute();
-
-                        // 5. Persist to Cloud Firestore Database!
-                        if (_activeChild != null && _activeChild!.id.isNotEmpty) {
-                          await _childrenService.updateChildLocations(
-                            childId: _activeChild!.id,
-                            pickupLocation: tempPickup.name,
-                            dropOffLocation: tempDropOff.name,
-                          );
-                        }
-
-                        // 5. Notify backend API
-                        await _apiService.updateStops(
-                          tripId: _getChildTripId(),
-                          pickup: {
-                            'name': tempPickup.name,
-                            'latitude': tempPickup.latitude,
-                            'longitude': tempPickup.longitude,
-                          },
-                          destination: {
-                            'name': tempDropOff.name,
-                            'latitude': tempDropOff.latitude,
-                            'longitude': tempDropOff.longitude,
-                          },
-                        );
-
-                        // 6. Refresh ETA
-                        _refreshETA();
-
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('📍 Route updated for ${_activeChild?.name ?? "Child"}: ${tempPickup.name} ➔ ${tempDropOff.name}'),
-                              backgroundColor: const Color(0xFF0D6B5D),
-                              duration: const Duration(seconds: 3),
+                      onPressed: _isSavingStops
+                          ? null
+                          : () => _saveLocationChanges(
+                              ctx,
+                              tempPickup,
+                              tempDropOff,
                             ),
-                          );
-                        }
-                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0D6B5D),
                         foregroundColor: Colors.white,
@@ -1074,10 +1023,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text(
-                        'Apply Changes to Map & Database',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
+                      child: _isSavingStops
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text(
+                              'Apply Changes to Map & Database',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -1087,6 +1045,114 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
         );
       },
     );
+  }
+
+  Future<void> _saveLocationChanges(
+    BuildContext modalContext,
+    BusStop pickup,
+    BusStop dropOff,
+  ) async {
+    final child = _activeChild;
+    if (child == null) return;
+
+    setState(() {
+      _isSavingStops = true;
+      _trackingError = null;
+    });
+
+    try {
+      final tripId = tripIdForChild(child);
+      if (tripId == null) {
+        throw const TrackingApiException(
+          'Live tracking is not configured for this route.',
+        );
+      }
+      await _apiService.updateStops(
+        tripId: tripId,
+        pickup: {
+          'name': pickup.name,
+          'latitude': pickup.latitude,
+          'longitude': pickup.longitude,
+        },
+        destination: {
+          'name': dropOff.name,
+          'latitude': dropOff.latitude,
+          'longitude': dropOff.longitude,
+        },
+      );
+      await _childrenService.updateChildLocations(
+        childId: child.id,
+        pickupLocation: pickup.name,
+        dropOffLocation: dropOff.name,
+      );
+
+      final updatedChild = ChildModel(
+        id: child.id,
+        parentId: child.parentId,
+        name: child.name,
+        school: dropOff.name,
+        grade: child.grade,
+        route: child.route,
+        vehicleNumber: child.vehicleNumber,
+        status: child.status,
+        eta: child.eta,
+        lastKnownLocation: 'Pickup: ${pickup.name} · Drop: ${dropOff.name}',
+        schoolInfo: dropOff.name,
+        pickupLocation: pickup.name,
+        pickupTime: child.pickupTime,
+        dropOffLocation: dropOff.name,
+        dropOffTime: child.dropOffTime,
+        transportOperator: child.transportOperator,
+        authorizedGuardians: child.authorizedGuardians,
+        emergencyContact: child.emergencyContact,
+        initials: child.initials,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _currentPickup = pickup;
+        _currentDropOff = dropOff;
+        _activeChild = updatedChild;
+      });
+
+      await _buildRouteFromPoints(
+        pickupPos: LatLng(pickup.latitude, pickup.longitude),
+        destinationPos: LatLng(dropOff.latitude, dropOff.longitude),
+        pickupName: pickup.name,
+        destinationName: dropOff.name,
+        childName: updatedChild.name,
+        routeName: updatedChild.route,
+      );
+
+      if (modalContext.mounted) Navigator.of(modalContext).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Route updated for ${updatedChild.name}.'),
+            backgroundColor: const Color(0xFF0D6B5D),
+          ),
+        );
+      }
+    } on TrackingApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message), backgroundColor: Colors.red),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to save the route changes. Please try again.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSavingStops = false);
+    }
   }
 
   String _getTimeAgoString() {
@@ -1118,6 +1184,24 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     return markers;
   }
 
+  void _navigateToTab(int index) {
+    if (index == 1) return;
+    if (index == 0) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      return;
+    }
+
+    final child = _activeChild;
+    final Widget destination = switch (index) {
+      2 => JourneyHistoryScreen(initialChild: child?.name),
+      3 => AlertsScreen(initialChild: child),
+      4 => const ProfileScreen(),
+      _ => const HomeScreen(),
+    };
+    Navigator.of(context)
+        .pushReplacement(MaterialPageRoute<void>(builder: (_) => destination));
+  }
+
   @override
   void dispose() {
     _locationSubscription?.cancel();
@@ -1125,7 +1209,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     _childrenSubscription?.cancel();
     _statusTicker?.cancel();
     _etaTicker?.cancel();
-    _realtimeMotionTimer?.cancel();
+    _apiService.dispose();
     _mapController?.dispose();
     super.dispose();
   }
@@ -1135,13 +1219,35 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     final child = _activeChild;
     final driver = _tripDetails?.driver;
     final vehicle = _tripDetails?.vehicle;
+    final driverName = driver?.name.trim();
+    final childVehicleDetails = child == null
+        ? ''
+        : [
+            child.vehicleNumber.trim(),
+            child.transportOperator.trim(),
+          ].where((value) => value.isNotEmpty).join(' • ');
+    final tripVehicleDetails = vehicle == null
+        ? ''
+        : [
+            vehicle.plateNumber.trim(),
+            vehicle.model.trim(),
+          ].where((value) => value.isNotEmpty).join(' • ');
+    final vehicleDetails = childVehicleDetails.isNotEmpty
+        ? childVehicleDetails
+        : tripVehicleDetails.isNotEmpty
+        ? tripVehicleDetails
+        : 'Vehicle details unavailable';
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: Color(0xFF1E293B)),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            size: 20,
+            color: Color(0xFF1E293B),
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Column(
@@ -1149,10 +1255,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           children: [
             Text(
               child != null ? 'Track ${child.name}' : 'Track School Bus',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A)),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+                color: Color(0xFF0F172A),
+              ),
             ),
             Text(
-              child != null ? '${child.school} • ${child.route}' : (_tripDetails?.routeName ?? 'School Route'),
+              child != null
+                  ? '${child.school} • ${child.route}'
+                  : (_tripDetails?.routeName ?? 'School Route'),
               style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               overflow: TextOverflow.ellipsis,
             ),
@@ -1168,7 +1280,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ),
               label: Text(
                 _isTripActive ? _getTimeAgoString() : 'Trip Ended',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               backgroundColor: const Color(0xFFF1F5F9),
               side: BorderSide.none,
@@ -1179,36 +1294,85 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       body: Stack(
         children: [
           // Google Map with Bus, Stops, and Polyline
-          GoogleMap(
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(6.9044, 79.8622),
-              zoom: 13.5,
+          if (isGoogleMapsApiAvailable)
+            GoogleMap(
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(6.9044, 79.8622),
+                zoom: 13.5,
+              ),
+              markers: _getAllMarkers(),
+              polylines: _polylines,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              onCameraMoveStarted: () {
+                if (_isProgrammaticCameraMove) return;
+                if (_autoFollowBus) {
+                  setState(() {
+                    _autoFollowBus = false;
+                  });
+                }
+              },
+              onCameraIdle: () {
+                _isProgrammaticCameraMove = false;
+              },
+              onMapCreated: (controller) {
+                _mapController = controller;
+                if (_activeChild != null) {
+                  _fitCameraToRoute();
+                } else if (_latestLocation != null) {
+                  _recenterOnBus();
+                }
+              },
+            )
+          else
+            const ColoredBox(
+              color: Color(0xFFF1F5F9),
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'Google Maps is not configured for Web. Set a valid key in '
+                    'web/maps_config.js and restart the app.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
             ),
-            markers: _getAllMarkers(),
-            polylines: _polylines,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            onCameraMoveStarted: () {
-              if (_isProgrammaticCameraMove) return;
-              if (_autoFollowBus) {
-                setState(() {
-                  _autoFollowBus = false;
-                });
-              }
-            },
-            onCameraIdle: () {
-              _isProgrammaticCameraMove = false;
-            },
-            onMapCreated: (controller) {
-              _mapController = controller;
-              if (_activeChild != null) {
-                _fitCameraToRoute();
-              } else if (_latestLocation != null) {
-                _recenterOnBus();
-              }
-            },
-          ),
+
+          if (_registeredChildren.isEmpty || _tripError != null)
+            Positioned(
+              top: 72,
+              left: 18,
+              right: 18,
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Color(0xFF0D6B5D)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _registeredChildren.isEmpty
+                              ? 'Link a child from your dashboard to start tracking.'
+                              : _tripError!,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                      if (_tripError != null)
+                        IconButton(
+                          tooltip: 'Retry',
+                          onPressed: _isLoadingTrip
+                              ? null
+                              : _loadTripDetailsAndStops,
+                          icon: const Icon(Icons.refresh),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
           // Top Child Switcher & Action Controls
           Positioned(
@@ -1229,16 +1393,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       separatorBuilder: (_, __) => const SizedBox(width: 8),
                       itemBuilder: (ctx, index) {
                         final c = _registeredChildren[index];
-                        final isSelected = c.id == _activeChild?.id || c.name == _activeChild?.name;
+                        final isSelected =
+                            c.id == _activeChild?.id ||
+                            c.name == _activeChild?.name;
                         return ChoiceChip(
                           avatar: CircleAvatar(
-                            backgroundColor: isSelected ? Colors.white : const Color(0xFF0D6B5D),
+                            backgroundColor: isSelected
+                                ? Colors.white
+                                : const Color(0xFF0D6B5D),
                             child: Text(
                               c.initials,
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: isSelected ? const Color(0xFF0D6B5D) : Colors.white,
+                                color: isSelected
+                                    ? const Color(0xFF0D6B5D)
+                                    : Colors.white,
                               ),
                             ),
                           ),
@@ -1247,7 +1417,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : const Color(0xFF1E293B),
+                              color: isSelected
+                                  ? Colors.white
+                                  : const Color(0xFF1E293B),
                             ),
                           ),
                           selected: isSelected,
@@ -1265,67 +1437,73 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     ElevatedButton.icon(
-                      onPressed: _openChangeLocationsSheet,
+                      onPressed: child == null
+                          ? null
+                          : _openChangeLocationsSheet,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xFF0D6B5D),
                         elevation: 4,
                         shadowColor: Colors.black26,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(20),
                         ),
                       ),
-                      icon: const Icon(Icons.edit_location_alt, size: 18, color: Color(0xFF0D6B5D)),
+                      icon: const Icon(
+                        Icons.edit_location_alt,
+                        size: 18,
+                        color: Color(0xFF0D6B5D),
+                      ),
                       label: const Text(
                         'Change Places',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
 
                     Row(
                       children: [
-                        // Live Simulation Play/Pause pill
-                        InkWell(
-                          onTap: () {
-                            setState(() {
-                              _isLiveSimulating = !_isLiveSimulating;
-                              if (_isLiveSimulating && _currentRoadResult != null) {
-                                _startRealtimeRouteMovement(_currentRoadResult!);
-                              } else {
-                                _realtimeMotionTimer?.cancel();
-                              }
-                            });
-                          },
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _isLiveSimulating ? const Color(0xFFE2F4F0) : Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _isLiveSimulating ? Icons.directions_bus : Icons.pause_circle_outline,
-                                  size: 14,
-                                  color: const Color(0xFF0D6B5D),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _latestLocation == null
+                                ? const Color(0xFFFFF7ED)
+                                : const Color(0xFFE2F4F0),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _latestLocation == null
+                                    ? Icons.gps_not_fixed
+                                    : Icons.gps_fixed,
+                                size: 14,
+                                color: _latestLocation == null
+                                    ? Colors.orange
+                                    : const Color(0xFF0D6B5D),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _latestLocation == null
+                                    ? 'Waiting for GPS'
+                                    : 'Live GPS',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0D6B5D),
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _isLiveSimulating
-                                      ? 'Live (${_currentSpeedKmh.toStringAsFixed(0)} km/h)'
-                                      : 'Paused',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF0D6B5D),
-                                  ),
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
 
@@ -1341,27 +1519,40 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           },
                           borderRadius: BorderRadius.circular(16),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.95),
                               borderRadius: BorderRadius.circular(16),
-                              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black12, blurRadius: 4),
+                              ],
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  _autoFollowBus ? Icons.sync : Icons.sync_disabled,
+                                  _autoFollowBus
+                                      ? Icons.sync
+                                      : Icons.sync_disabled,
                                   size: 14,
-                                  color: _autoFollowBus ? Colors.green : Colors.grey,
+                                  color: _autoFollowBus
+                                      ? Colors.green
+                                      : Colors.grey,
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
-                                  _autoFollowBus ? 'Auto-Follow' : 'Free Explore',
+                                  _autoFollowBus
+                                      ? 'Auto-Follow'
+                                      : 'Free Explore',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: _autoFollowBus ? Colors.green.shade700 : Colors.grey.shade700,
+                                    color: _autoFollowBus
+                                        ? Colors.green.shade700
+                                        : Colors.grey.shade700,
                                   ),
                                 ),
                               ],
@@ -1384,25 +1575,31 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               children: [
                 FloatingActionButton.small(
                   heroTag: 'recenter_btn',
-                  backgroundColor: _autoFollowBus ? const Color(0xFF0D6B5D) : Colors.white,
+                  backgroundColor: _autoFollowBus
+                      ? const Color(0xFF0D6B5D)
+                      : Colors.white,
                   onPressed: _recenterOnBus,
                   child: Icon(
                     Icons.my_location,
-                    color: _autoFollowBus ? Colors.white : const Color(0xFF0D6B5D),
+                    color: _autoFollowBus
+                        ? Colors.white
+                        : const Color(0xFF0D6B5D),
                   ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'zoom_in_btn',
                   backgroundColor: Colors.white,
-                  onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomIn()),
+                  onPressed: () =>
+                      _mapController?.animateCamera(CameraUpdate.zoomIn()),
                   child: const Icon(Icons.add, color: Colors.black87),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'zoom_out_btn',
                   backgroundColor: Colors.white,
-                  onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomOut()),
+                  onPressed: () =>
+                      _mapController?.animateCamera(CameraUpdate.zoomOut()),
                   child: const Icon(Icons.remove, color: Colors.black87),
                 ),
               ],
@@ -1430,7 +1627,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFFE2F4F0),
                             borderRadius: BorderRadius.circular(8),
@@ -1461,14 +1661,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         // Real-time calculated ETA
                         Row(
                           children: [
-                            const Icon(Icons.access_time_filled, size: 16, color: Color(0xFF0D6B5D)),
+                            const Icon(
+                              Icons.access_time_filled,
+                              size: 16,
+                              color: Color(0xFF0D6B5D),
+                            ),
                             const SizedBox(width: 5),
                             Text(
                               _latestEta != null
-                                  ? (_rideStatus == 'ARRIVED AT SCHOOL'
-                                      ? 'Arrived at destination'
-                                      : 'Arriving in ${_latestEta!.etaMinutes} min • ${_latestEta!.distanceKm} km')
-                                  : (child?.eta ?? 'Calculating ETA...'),
+                                  ? '${_latestEta!.isEstimate ? 'Estimated arrival' : 'Arriving'} in ${_latestEta!.etaMinutes} min • ${_latestEta!.distanceKm} km'
+                                  : _latestLocation == null
+                                  ? (_isLoadingTrip
+                                        ? 'Loading trip details…'
+                                        : 'Waiting for live bus location')
+                                  : 'Calculating live ETA…',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13.5,
@@ -1480,11 +1686,28 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ],
                     ),
 
+                    if (_trackingError != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _trackingError!,
+                          style: const TextStyle(
+                            color: Color(0xFFB91C1C),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+
                     const SizedBox(height: 12),
 
                     // Pickup and Drop-off summary strip for this child
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.circular(10),
@@ -1492,23 +1715,45 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.trip_origin, size: 14, color: Colors.green),
+                          const Icon(
+                            Icons.trip_origin,
+                            size: 14,
+                            color: Colors.green,
+                          ),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              _currentPickup?.name ?? (child?.pickupLocation ?? 'Pickup'),
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                              _currentPickup?.name ??
+                                  (child?.pickupLocation ?? 'Pickup'),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1E293B),
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const Icon(Icons.arrow_forward, size: 13, color: Colors.grey),
+                          const Icon(
+                            Icons.arrow_forward,
+                            size: 13,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 6),
-                          const Icon(Icons.location_on, size: 14, color: Colors.red),
+                          const Icon(
+                            Icons.location_on,
+                            size: 14,
+                            color: Colors.red,
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              _currentDropOff?.name ?? (child?.school ?? 'School'),
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                              _currentDropOff?.name ??
+                                  (child?.school ?? 'School'),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1E293B),
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1524,9 +1769,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     Row(
                       children: [
                         const CircleAvatar(
-                            radius: 22,
-                            backgroundColor: Color(0xFFFFB703),
-                            child: Icon(Icons.directions_bus_rounded, color: Colors.white, size: 24),
+                          radius: 22,
+                          backgroundColor: Color(0xFFFFB703),
+                          child: Icon(
+                            Icons.directions_bus_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1534,7 +1783,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                driver != null ? '${driver.name} (Driver)' : 'Sunil Weerasinghe (Driver)',
+                                driverName?.isNotEmpty == true
+                                    ? '$driverName (Driver)'
+                                    : 'Driver details unavailable',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15,
@@ -1543,11 +1794,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                child != null
-                                    ? '${child.vehicleNumber} • ${child.transportOperator}'
-                                    : (vehicle != null
-                                        ? '${vehicle.plateNumber} • ${vehicle.model}'
-                                        : 'NB-4821 • City School Transport'),
+                                vehicleDetails,
                                 style: const TextStyle(
                                   color: Color(0xFF64748B),
                                   fontSize: 12.5,
@@ -1560,16 +1807,26 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           style: IconButton.styleFrom(
                             backgroundColor: const Color(0xFFE2F4F0),
                           ),
-                          icon: const Icon(Icons.phone, color: Color(0xFF0D6B5D), size: 20),
-                          onPressed: () {
-                            final phone = driver?.phone ?? child?.emergencyContact ?? '+94 77 555 0199';
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Calling driver: $phone'),
-                                backgroundColor: const Color(0xFF0D6B5D),
-                              ),
-                            );
-                          },
+                          icon: const Icon(
+                            Icons.copy,
+                            color: Color(0xFF0D6B5D),
+                            size: 20,
+                          ),
+                          tooltip: 'Copy driver phone number',
+                          onPressed: driver?.phone.isNotEmpty == true
+                              ? () {
+                                  final phone = driver!.phone;
+                                  Clipboard.setData(ClipboardData(text: phone));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Driver phone number copied: $phone',
+                                      ),
+                                      backgroundColor: const Color(0xFF0D6B5D),
+                                    ),
+                                  );
+                                }
+                              : null,
                         ),
                       ],
                     ),
@@ -1591,12 +1848,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         icon: const Icon(Icons.history, size: 18),
                         label: const Text(
                           'View Full Journey Timeline',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
                         ),
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => const JourneyHistoryScreen(),
+                              builder: (_) => JourneyHistoryScreen(
+                                initialChild: child?.name,
+                              ),
                             ),
                           );
                         },
@@ -1608,6 +1870,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
           ),
         ],
+      ),
+      bottomNavigationBar: ParentBottomNavigation(
+        currentIndex: 1,
+        onTap: _navigateToTab,
       ),
     );
   }

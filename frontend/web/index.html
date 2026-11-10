@@ -33,14 +33,51 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <script>
+    window.SAFEROUTE_GOOGLE_MAPS_READY = false;
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
-  <script src="flutter_bootstrap.js" async></script>
+    function startFlutterApp() {
+      const bootstrap = document.createElement('script');
+      bootstrap.src = 'flutter_bootstrap.js';
+      bootstrap.async = true;
+      document.body.appendChild(bootstrap);
+    }
+
+    function loadMapsThenFlutter() {
+      const apiKey = window.SAFEROUTE_GOOGLE_MAPS_API_KEY;
+      if (!apiKey || apiKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
+        startFlutterApp();
+        return;
+      }
+
+      if (window.google && window.google.maps) {
+        window.SAFEROUTE_GOOGLE_MAPS_READY = true;
+        startFlutterApp();
+        return;
+      }
+
+      const mapsScript = document.createElement('script');
+      mapsScript.dataset.saferouteMaps = 'true';
+      mapsScript.src =
+        'https://maps.googleapis.com/maps/api/js?key=' +
+        encodeURIComponent(apiKey);
+      mapsScript.async = true;
+      mapsScript.defer = true;
+      mapsScript.onload = () => {
+        window.SAFEROUTE_GOOGLE_MAPS_READY = Boolean(
+          window.google && window.google.maps,
+        );
+        startFlutterApp();
+      };
+      mapsScript.onerror = startFlutterApp;
+      document.head.appendChild(mapsScript);
+    }
+
+    const mapsConfig = document.createElement('script');
+    mapsConfig.src = 'maps_config.js';
+    mapsConfig.onload = loadMapsThenFlutter;
+    mapsConfig.onerror = startFlutterApp;
+    document.head.appendChild(mapsConfig);
+  </script>
 </body>
 </html>

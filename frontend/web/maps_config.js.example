@@ -1,0 +1,3 @@
+// Copy this file to maps_config.js and provide a browser-restricted key.
+// Maps browser keys are visible in client code; restrict by HTTP referrer and API.
+window.SAFEROUTE_GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY';

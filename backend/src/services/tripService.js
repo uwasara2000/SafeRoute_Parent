@@ -1,6 +1,24 @@
-const { firebaseRest } = require('../config/firebase');
+const { db, firebaseRest } = require('../config/firebase');
 
-// In-memory data store for trips & events
+async function readFirebaseValue(path) {
+  if (!db) return firebaseRest.get(path);
+  const snapshot = await db.ref(path).once('value');
+  return snapshot.val();
+}
+
+async function writeFirebaseValue(path, value) {
+  if (!db) return firebaseRest.set(path, value);
+  await db.ref(path).set(value);
+  return value;
+}
+
+async function updateFirebaseValue(path, values) {
+  if (!db) return firebaseRest.update(path, values);
+  await db.ref(path).update(values);
+  return values;
+}
+
+// Static route catalog; live status, stops, locations, and events are stored in Firebase.
 const trips = {
   trip_001: {
     tripId: 'trip_001',
@@ -109,63 +127,37 @@ class TripService {
    * Fetch trip details
    */
   async getTrip(tripId) {
-    let trip = trips[tripId];
-    if (!trip) {
-      // Dynamic fallback for any child route
-      trip = {
-        tripId,
-        routeId: tripId,
-        routeName: `Route - ${tripId}`,
-        active: true,
-        driver: {
-          driverId: 'driver_default',
-          name: 'Sunil Weerasinghe',
-          phone: '+94 71 892 3411',
-          licenseNo: 'B829103'
-        },
-        vehicle: {
-          vehicleId: `bus_${tripId}`,
-          plateNumber: 'NB-4821',
-          model: 'Toyota Coaster 28-Seater',
-          capacity: 28
-        },
-        destination: {
-          name: 'School Destination',
-          latitude: 6.9044,
-          longitude: 79.8622
-        },
-        stops: []
-      };
-    }
+    const trip = trips[tripId];
+    if (!trip) return null;
 
-    try {
-      const activeState = await firebaseRest.get(`liveTrips/${tripId}/active`);
-      if (typeof activeState === 'boolean') {
-        trip.active = activeState;
-      }
-    } catch (e) {
-      // Use local state if network is momentarily unavailable
-    }
+    const [activeState, destination, stops] = await Promise.all([
+      readFirebaseValue(`liveTrips/${tripId}/active`),
+      readFirebaseValue(`liveTrips/${tripId}/destination`),
+      readFirebaseValue(`liveTrips/${tripId}/stops`)
+    ]);
 
-    return trip;
+    return {
+      ...trip,
+      active: activeState === true,
+      destination: destination && typeof destination === 'object'
+        ? destination
+        : trip.destination,
+      stops: Array.isArray(stops) ? stops : trip.stops
+    };
   }
 
   /**
    * Fetch live location from Firebase Realtime Database
    */
   async getLatestLocation(tripId) {
-    try {
-      return await firebaseRest.get(`liveTrips/${tripId}/location`);
-    } catch (error) {
-      console.error('Error fetching live location from Firebase:', error.message);
-      return null;
-    }
+    return readFirebaseValue(`liveTrips/${tripId}/location`);
   }
 
   /**
    * Update location from Driver App and write directly to Firebase
    */
   async updateLocation(tripId, locationData) {
+    if (!trips[tripId]) return null;
     const { latitude, longitude, heading, speedMps, accuracyM } = locationData;
 
     const payload = {
@@ -178,7 +170,7 @@ class TripService {
     };
 
     // Update Firebase Realtime Database at liveTrips/:tripId/location
-    await firebaseRest.set(`liveTrips/${tripId}/location`, payload);
+    await writeFirebaseValue(`liveTrips/${tripId}/location`, payload);
     return payload;
   }
 
@@ -186,10 +178,8 @@ class TripService {
    * Start a trip (Driver)
    */
   async startTrip(tripId) {
-    if (trips[tripId]) {
-      trips[tripId].active = true;
-    }
-    await firebaseRest.set(`liveTrips/${tripId}/active`, true);
+    const trip = trips[tripId];
+    if (!trip) return null;
 
     const startEvent = {
       id: `evt_${Date.now()}`,
@@ -199,9 +189,11 @@ class TripService {
       description: 'Trip started by driver.'
     };
 
-    if (trips[tripId]) {
-      trips[tripId].events.push(startEvent);
-    }
+    await updateFirebaseValue(`liveTrips/${tripId}`, {
+      active: true,
+      [`events/${startEvent.id}`]: startEvent
+    });
+    trip.active = true;
     return { success: true, tripId, active: true };
   }
 
@@ -209,10 +201,8 @@ class TripService {
    * End a trip (Driver)
    */
   async endTrip(tripId) {
-    if (trips[tripId]) {
-      trips[tripId].active = false;
-    }
-    await firebaseRest.set(`liveTrips/${tripId}/active`, false);
+    const trip = trips[tripId];
+    if (!trip) return null;
 
     const endEvent = {
       id: `evt_${Date.now()}`,
@@ -222,9 +212,11 @@ class TripService {
       description: 'Trip concluded at school destination.'
     };
 
-    if (trips[tripId]) {
-      trips[tripId].events.push(endEvent);
-    }
+    await updateFirebaseValue(`liveTrips/${tripId}`, {
+      active: false,
+      [`events/${endEvent.id}`]: endEvent
+    });
+    trip.active = false;
     return { success: true, tripId, active: false };
   }
 
@@ -233,42 +225,51 @@ class TripService {
    */
   async getEvents(tripId) {
     const trip = trips[tripId];
-    return trip ? trip.events : [];
+    if (!trip) return null;
+
+    const storedEvents = await readFirebaseValue(`liveTrips/${tripId}/events`);
+    if (Array.isArray(storedEvents)) return storedEvents;
+    if (storedEvents && typeof storedEvents === 'object') {
+      return Object.values(storedEvents);
+    }
+    return [];
   }
 
   /**
    * Update pickup or drop-off location for a trip
    */
   async updateTripStops(tripId, { pickup, destination }) {
-    let trip = trips[tripId];
-    if (!trip) {
-      trip = await this.getTrip(tripId);
-      trips[tripId] = trip;
-    }
+    const trip = await this.getTrip(tripId);
+    if (!trip) return null;
+    const updatedTrip = {
+      ...trip,
+      destination: { ...trip.destination },
+      stops: trip.stops.map((stop) => ({ ...stop }))
+    };
 
     if (destination) {
-      trip.destination = {
-        name: destination.name || trip.destination.name,
+      updatedTrip.destination = {
+        name: destination.name.trim(),
         latitude: Number(destination.latitude),
         longitude: Number(destination.longitude)
       };
-      const lastStopIndex = trip.stops.length - 1;
+      const lastStopIndex = updatedTrip.stops.length - 1;
       if (lastStopIndex >= 0) {
-        trip.stops[lastStopIndex] = {
+        updatedTrip.stops[lastStopIndex] = {
           id: 'stop_destination',
-          name: trip.destination.name,
-          latitude: trip.destination.latitude,
-          longitude: trip.destination.longitude,
-          order: trip.stops.length
+          name: updatedTrip.destination.name,
+          latitude: updatedTrip.destination.latitude,
+          longitude: updatedTrip.destination.longitude,
+          order: updatedTrip.stops.length
         };
       }
     }
 
     if (pickup) {
-      if (trip.stops.length > 0) {
-        trip.stops[0] = {
+      if (updatedTrip.stops.length > 0) {
+        updatedTrip.stops[0] = {
           id: 'stop_pickup',
-          name: pickup.name || trip.stops[0].name,
+          name: pickup.name.trim(),
           latitude: Number(pickup.latitude),
           longitude: Number(pickup.longitude),
           order: 1
@@ -276,15 +277,13 @@ class TripService {
       }
     }
 
-    // Also sync to Firebase Realtime Database
-    try {
-      await firebaseRest.set(`liveTrips/${tripId}/destination`, trip.destination);
-      await firebaseRest.set(`liveTrips/${tripId}/stops`, trip.stops);
-    } catch (e) {
-      console.warn('Firebase sync warning:', e.message);
-    }
+    await updateFirebaseValue(`liveTrips/${tripId}`, {
+      destination: updatedTrip.destination,
+      stops: updatedTrip.stops
+    });
 
-    return trip;
+    trips[tripId] = updatedTrip;
+    return updatedTrip;
   }
 }
 
